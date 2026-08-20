@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Shelter</string>
+    <string name="app_name" translatable="false">Shelter</string>
+    <string name="first_run_alert_cancel">Bye</string>
+    <string name="first_run_alert_continue">Continue</string>
     <string name="device_admin_label">Shelter Device Admin</string>
     <string name="device_admin_desc">Required for work profile management</string>
     <string name="payment_stub_description">Shelter Payment Stub</string>
@@ -10,15 +12,16 @@
     <string name="tab_work">Work</string>
 
     <!-- Actions -->
-    <string name="clone_to_work">Clone to Work Profile</string>
-    <string name="clone_to_main">Clone to Main Profile</string>
-    <string name="freeze">Freeze</string>
-    <string name="unfreeze">Unfreeze</string>
-    <string name="auto_freeze">Auto Freeze</string>
-    <string name="remove_auto_freeze">Remove Auto Freeze</string>
-    <string name="create_shortcut">Create Unfreeze Shortcut</string>
-    <string name="uninstall">Uninstall</string>
+    <string name="clone_to_work_profile">Clone to Work Profile</string>
+    <string name="clone_to_main_profile">Clone to Main Profile</string>
+    <string name="freeze_app">Freeze</string>
+    <string name="unfreeze_app">Unfreeze</string>
     <string name="launch">Launch</string>
+    <string name="uninstall_app">Uninstall</string>
+    <string name="create_unfreeze_shortcut">Create Unfreeze Shortcut</string>
+    <string name="auto_freeze">Auto Freeze</string>
+    <string name="allow_cross_profile_widgets">Allow Widgets in Main Profile</string>
+    <string name="allow_cross_profile_interaction">Allow Cross-Profile Interaction</string>
 
     <!-- Setup -->
     <string name="setup_welcome_title">Welcome to Shelter</string>
@@ -34,48 +37,94 @@
     <string name="setup_button_start">Create Work Profile</string>
     <string name="setup_button_finish">Finish</string>
 
-    <!-- Settings -->
-    <string name="settings">Settings</string>
-    <string name="settings_cross_profile_file_chooser">Cross-profile file chooser</string>
-    <string name="settings_block_contacts">Block contacts searching</string>
-    <string name="settings_auto_freeze">Auto-freeze service</string>
-    <string name="settings_freeze_delay">Freeze delay</string>
-    <string name="settings_skip_foreground">Skip foreground apps</string>
-    <string name="settings_payment_stub">Payment stub service</string>
-
-    <!-- Cross-profile core -->
+    <!-- Notifications -->
+    <string name="notifications_important">Shelter Important</string>
+    <string name="finish_provision_title">Click here to finish setting up Shelter</string>
+    <string name="finish_provision_desc">Congratulations! You are one click away from finishing setting up Shelter.</string>
+    <string name="service_title">Shelter Service</string>
+    <string name="service_desc">Shelter is now running …</string>
+    <string name="service_auto_freeze_title">Auto-freeze pending</string>
+    <string name="service_auto_freeze_desc">Shelter will auto-freeze apps launched from "Unfreeze &amp; Launch" on the next screen lock event.</string>
+    <string name="service_auto_freeze_now">Freeze Now</string>
     <string name="app_installing">Installing app…</string>
-    <string name="provision_finished">Work profile provisioned</string>
-    <string name="launch_app_fail">Cannot launch %s</string>
-    <string name="freeze_all_success">All apps frozen</string>
 
-    <!-- Errors -->
-    <string name="work_profile_not_found">Work profile not found. Please run setup.</string>
-    <string name="service_unavailable">Service unavailable</string>
-    <string name="auth_failed">Cross-profile authentication failed</string>
-
-    <!-- General -->
-    <string name="search">Search</string>
-    <string name="loading">Loading…</string>
-    <string name="no_apps">No apps found</string>
-    <string name="confirm_uninstall">Uninstall %s?</string>
-    <string name="frozen_indicator">Frozen</string>
-    <string name="auto_freeze_indicator">Auto-freeze</string>
-
-    <!-- Batch actions -->
-    <string name="batch_freeze">Freeze selected</string>
+    <!-- Main UI -->
+    <string name="fragment_profile_main">Main</string>
+    <string name="fragment_profile_work">Shelter</string>
+    <string name="list_item_disabled">[Frozen] %s</string>
+    <string name="batch_operation">Batch operation</string>
     <string name="selected_count">%d selected</string>
 
-    <!-- Freeze delay options -->
-    <string name="delay_immediate">Immediately</string>
-    <string name="delay_1min">1 minute</string>
-    <string name="delay_5min">5 minutes</string>
-    <string name="delay_10min">10 minutes</string>
+    <!-- App Context Menu -->
+    <string name="app_context_menu_title">Operations for %s</string>
 
-    <!-- Services -->
-    <string name="service_title">Shelter Service</string>
-    <string name="service_desc">Shelter is now running &#8230;</string>
-    <string name="service_auto_freeze_title">Auto-freeze pending</string>
-    <string name="service_auto_freeze_desc">Shelter will auto-freeze apps launched from \"Unfreeze &amp; Launch\" on the next screen lock event.</string>
-    <string name="service_auto_freeze_now">Freeze Now</string>
+    <!-- Action Bar Options Menu -->
+    <string name="search">Search</string>
+    <string name="freeze_all">Batch Freeze</string>
+    <string name="create_freeze_all_shortcut">Create Batch Freeze Shortcut</string>
+    <string name="freeze_all_shortcut">Freeze</string>
+    <string name="install_app_to_profile">Install APK into Shelter</string>
+    <string name="install_app_to_profile_success">Application installation finished in work profile.</string>
+    <string name="show_all">Show All Apps</string>
+    <string name="show_all_warning">Manipulating apps that are hidden from the list could cause crashes and all sorts of unexpected behavior. However, this feature can be useful when faulty vendor-customized ROMs does not enable all necessary system apps in work profile by default. If you continue, you are on your own.</string>
+    <string name="documents_ui">Open Documents UI</string>
+
+    <!-- Settings Options -->
+    <string name="settings">Settings</string>
+    <string name="settings_interaction">Interaction</string>
+    <string name="settings_cross_profile_file_chooser">File Shuttle</string>
+    <string name="settings_cross_profile_file_chooser_desc">When enabled, you\'ll be able to browse / view / pick / copy files across profiles through Documents UI.</string>
+    <string name="settings_block_contacts_searching">Block Contacts Searching</string>
+    <string name="settings_block_contacts_searching_desc">Deny access from main profile to contacts inside work profile.</string>
+    <string name="settings_payment_stub">Payment Service Stub</string>
+    <string name="settings_payment_stub_desc">Enable a fake NFC payment service in the main profile.</string>
+    <string name="settings_services">Services</string>
+    <string name="settings_auto_freeze_service">Auto Freeze Service</string>
+    <string name="settings_auto_freeze_service_desc">Automatically freeze apps launched from "Unfreeze &amp; Launch" when the screen is locked.</string>
+    <string name="settings_auto_freeze_delay">Auto Freeze Delay</string>
+    <string name="settings_dont_freeze_foreground">Skip Foreground Apps</string>
+    <string name="settings_dont_freeze_foreground_desc">Do NOT freeze foreground apps when you lock your screen.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_source_code">Source Code</string>
+    <string name="settings_source_code_url" translatable="false">https://gitea.angry.im/PeterCxy/Shelter</string>
+    <string name="settings_translate">Translate</string>
+    <string name="settings_translate_url" translatable="false">https://weblate.typeblog.net/projects/shelter/shelter/</string>
+    <string name="settings_bug_report">Bug Report / Issue Tracker</string>
+    <string name="settings_bug_report_url" translatable="false">https://lists.sr.ht/~petercxy/shelter</string>
+    <string name="settings_patreon" translatable="false">Patreon</string>
+    <string name="settings_patreon_url" translatable="false">https://www.patreon.com/PeterCxy</string>
+
+    <!-- Toast Long Texts -->
+    <string name="provision_finished">Shelter setup complete. Now restarting Shelter.</string>
+    <string name="work_profile_not_found">Work profile not found. Please restart the app to re-provision the profile.</string>
+    <string name="work_mode_disabled">It looks like you have disabled Work Mode while starting Shelter. If you have enabled it now, please start Shelter again.</string>
+    <string name="clone_success">Application "%s" cloned successfully</string>
+    <string name="uninstall_success">Application "%s" uninstalled successfully</string>
+    <string name="freeze_success">Application "%s" frozen successfully</string>
+    <string name="unfreeze_success">Application "%s" unfrozen successfully</string>
+    <string name="clone_fail_system_app">Cannot clone system apps to a profile that Shelter has no control of.</string>
+    <string name="uninstall_fail_system_app">Cannot uninstall system apps in a profile that Shelter has no control of.</string>
+    <string name="unsupported_launcher">Cannot add shortcuts to your launcher.</string>
+    <string name="shortcut_create_success">Shortcut created on your launcher.</string>
+    <string name="launch_app_fail">Cannot launch app %s because it has no GUI.</string>
+    <string name="request_usage_stats">Shelter needs <b>Usage Stats</b> permission to do this. Please enable the permission for <b>BOTH OF THE TWO</b> Shelter apps shown in the dialog after you press "Ok".</string>
+    <string name="request_storage_manager">Shelter needs access to <b>All Files</b> for File Shuttle. Please enable the permission for <b>BOTH OF THE TWO</b> (Personal / Work) Shelter apps shown in the dialog after you press "Ok".</string>
+    <string name="request_system_alert">Shelter needs to <b>Draw over Other Apps</b> in order for File Shuttle to function correctly. Please enable the permission for <b>BOTH OF THE TWO</b> (Personal / Work) Shelter apps shown in the dialog after you press "Ok".</string>
+
+    <!-- MIUI -->
+    <string name="miui_cannot_clone">Cloning non-system apps to another profile is currently not possible on MIUI. Please clone your system\'s app store into the other profile and install apps from there.</string>
+    <string name="continue_anyway">Continue anyway</string>
+
+    <!-- Formats -->
+    <string name="format_minutes">%d min</string>
+
+    <!-- General -->
+    <string name="loading">Loading…</string>
+    <string name="no_apps">No apps found</string>
+    <string name="frozen_indicator">Frozen</string>
+    <string name="auto_freeze_indicator">Auto-freeze</string>
+    <string name="batch_freeze">Freeze selected</string>
+    <string name="service_unavailable">Service unavailable</string>
+    <string name="auth_failed">Cross-profile authentication failed</string>
 </resources>
