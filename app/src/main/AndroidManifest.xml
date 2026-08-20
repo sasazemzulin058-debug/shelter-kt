@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:installLocation="internalOnly">
+
+    <uses-feature android:name="android.software.device_admin" android:required="true"/>
+    <uses-feature android:name="android.software.managed_users" android:required="true"/>
+
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:maxSdkVersion="25"
+        android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.NFC" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+        </intent>
+    </queries>
+
+    <application
+        android:name=".ShelterApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Shelter">
+
+        <!-- Main Compose activity -->
+        <activity android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Setup wizard -->
+        <activity android:name=".ui.setup.SetupActivity"
+            android:theme="@style/Theme.Shelter"
+            android:exported="false"/>
+
+        <!-- Cross-profile intent proxy (invisible) -->
+        <activity android:name=".profile.DummyActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:taskAffinity=""
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.START_SERVICE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.TRY_START_SERVICE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.INSTALL_PACKAGE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.UNINSTALL_PACKAGE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.FINALIZE_PROVISION"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.UNFREEZE_AND_LAUNCH"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.PUBLIC_FREEZE_ALL"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.PUBLIC_UNFREEZE_AND_LAUNCH"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.FREEZE_ALL_IN_LIST"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.START_FILE_SHUTTLE"/>
+                <action android:name="net.typeblog.shelter.action.START_FILE_SHUTTLE_2"/>
+                <action android:name="net.typeblog.shelter.action.PACKAGEINSTALLER_CALLBACK"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="net.typeblog.shelter.action.SYNCHRONIZE_PREFERENCE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Provisioning finalize listener -->
+        <activity android:name=".profile.FinalizeActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:launchMode="singleTask"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Device admin receiver -->
+        <receiver android:name=".receivers.DeviceAdminReceiver"
+            android:label="@string/device_admin_label"
+            android:description="@string/device_admin_desc"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data android:name="android.app.device_admin"
+                android:resource="@xml/device_admin"/>
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED"/>
+                <action android:name="android.app.action.PROVISION_MANAGED_PROFILE"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- File provider proxy -->
+        <provider
+            android:name=".util.FileProviderProxy"
+            android:authorities="net.typeblog.shelter.files"
+            android:grantUriPermissions="true"
+            android:exported="false">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths"/>
+        </provider>
+
+        <!-- Cross-profile documents provider -->
+        <provider
+            android:name=".util.CrossProfileDocumentsProvider"
+            android:authorities="net.typeblog.shelter.documents"
+            android:grantUriPermissions="true"
+            android:exported="true"
+            android:enabled="false"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER"/>
+            </intent-filter>
+        </provider>
+
+        <!-- Core service running in both profiles -->
+        <service android:name=".services.ShelterService"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"/>
+
+        <!-- File shuttle service -->
+        <service android:name=".services.FileShuttleService"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"/>
+
+        <!-- Killer service -->
+        <service android:name=".services.KillerService"/>
+
+        <!-- Auto-freeze service -->
+        <service android:name=".services.FreezeService"
+            android:foregroundServiceType="systemExempted"/>
+
+        <!-- Payment stub -->
+        <service android:name=".services.PaymentStubService"
+            android:exported="true"
+            android:enabled="false"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE"/>
+            </intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/payment_stub"/>
+        </service>
+
+    </application>
+
+</manifest>

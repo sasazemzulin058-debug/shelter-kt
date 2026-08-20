@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="shelter_primary">#1976D2</color>
+    <color name="shelter_on_primary">#FFFFFF</color>
+    <color name="shelter_secondary">#455A64</color>
+</resources>

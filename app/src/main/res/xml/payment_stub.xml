@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/payment_stub_description"
+    android:apduServiceBanner="@mipmap/ic_launcher"
+    android:requireDeviceUnlock="false">
+    <aid-group android:description="@string/payment_stub_description"
+        android:category="payment">
+        <aid-filter android:name="325041592E5359532E4444463031"/>
+    </aid-group>
+</host-apdu-service>
