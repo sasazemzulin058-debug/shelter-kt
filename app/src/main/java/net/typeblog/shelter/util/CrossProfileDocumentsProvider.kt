@@ -256,6 +256,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
         val result = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
         includeFile(result, fileInfo)
         return result
+    }
 
     override fun queryChildDocuments(
         parentDocumentId: String,
