@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/payment_stub_description"
-    android:apduServiceBanner="@mipmap/ic_launcher"
+    android:apduServiceBanner="@mipmap/ic_launcher_egg"
     android:requireDeviceUnlock="false">
     <aid-group android:description="@string/payment_stub_description"
         android:category="payment">
