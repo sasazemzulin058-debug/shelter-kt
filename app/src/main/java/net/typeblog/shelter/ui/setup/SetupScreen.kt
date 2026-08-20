@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
@@ -41,17 +42,17 @@ enum class Step {
     FAILED;
 
     fun onBack(): Step = when (this) {
-        PERMISSIONS -> WELCOME
-        COMPATIBILITY -> PERMISSIONS
-        READY -> COMPATIBILITY
+        Step.PERMISSIONS -> Step.WELCOME
+        Step.COMPATIBILITY -> Step.PERMISSIONS
+        Step.READY -> Step.COMPATIBILITY
         else -> this
     }
 
     fun onNext(): Step = when (this) {
-        WELCOME -> PERMISSIONS
-        PERMISSIONS -> COMPATIBILITY
-        COMPATIBILITY -> READY
-        READY -> PROVISIONING
+        Step.WELCOME -> Step.PERMISSIONS
+        Step.PERMISSIONS -> Step.COMPATIBILITY
+        Step.COMPATIBILITY -> Step.READY
+        Step.READY -> Step.PROVISIONING
         else -> this
     }
 
@@ -60,10 +61,10 @@ enum class Step {
     /** Whether a primary action button is shown (and what it does). */
     val buttonAction: ButtonAction?
         get() = when (this) {
-            WELCOME, PERMISSIONS, COMPATIBILITY -> ButtonAction.NEXT
-            READY -> ButtonAction.START
-            FAILED -> ButtonAction.DISMISS
-            PROVISIONING, ACTION_REQUIRED -> null
+            Step.WELCOME, Step.PERMISSIONS, Step.COMPATIBILITY -> ButtonAction.NEXT
+            Step.READY -> ButtonAction.START
+            Step.FAILED -> ButtonAction.DISMISS
+            Step.PROVISIONING, Step.ACTION_REQUIRED -> null
         }
 
     companion object {
@@ -82,20 +83,21 @@ private data class StepContent(
 
 private val Step.content: StepContent
     get() = when (this) {
-        WELCOME -> StepContent(R.string.setup_welcome_title, R.string.setup_welcome_desc)
-        PERMISSIONS -> StepContent(R.string.setup_permissions_title, R.string.setup_permissions_desc)
-        COMPATIBILITY -> StepContent(R.string.setup_compatibility_title, R.string.setup_compatibility_desc)
-        READY -> StepContent(R.string.setup_ready_title, R.string.setup_ready_desc)
-        PROVISIONING -> StepContent(R.string.setup_provisioning, R.string.loading)
-        ACTION_REQUIRED -> StepContent(
-            R.string.setup_action_required_title, R.string.setup_action_required_desc)
-        FAILED -> StepContent(R.string.setup_failed, R.string.setup_failed)
+        Step.WELCOME -> StepContent(R.string.setup_welcome_title, R.string.setup_welcome_desc)
+        Step.PERMISSIONS -> StepContent(R.string.setup_permissions_title, R.string.setup_permissions_desc)
+        Step.COMPATIBILITY -> StepContent(R.string.setup_compatibility_title, R.string.setup_compatibility_desc)
+        Step.READY -> StepContent(R.string.setup_ready_title, R.string.setup_ready_desc)
+        Step.PROVISIONING -> StepContent(R.string.setup_provisioning, R.string.loading)
+        Step.ACTION_REQUIRED -> StepContent(
+            R.string.finish_provision_title, R.string.finish_provision_desc)
+        Step.FAILED -> StepContent(R.string.setup_failed, R.string.setup_failed)
     }
 
 /**
  * Simple stateful wizard. Renders the current [step] with a cross-fade and
  * delegates navigation to the activity, which owns the provisioning launch.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(
     step: Step,

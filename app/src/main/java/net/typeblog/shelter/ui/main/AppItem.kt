@@ -2,6 +2,7 @@ package net.typeblog.shelter.ui.main
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.typeblog.shelter.data.model.AppInfo
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppItem(
     app: AppInfo,

@@ -135,9 +135,10 @@ class ShelterService : Service() {
             } else {
                 if (mIsProfileOwner) {
                     // We can only enable system apps in our own profile.
-                    mPolicyManager!!.enableSystemApp(mAdminComponent, app.packageName)
+                    val admin = mAdminComponent ?: return
+                    mPolicyManager!!.enableSystemApp(admin, app.packageName)
                     // Also set the hidden state to false.
-                    mPolicyManager!!.setApplicationHidden(mAdminComponent, app.packageName, false)
+                    mPolicyManager!!.setApplicationHidden(admin, app.packageName, false)
                     callback!!.callback(Activity.RESULT_OK)
                 } else {
                     callback!!.callback(RESULT_CANNOT_INSTALL_SYSTEM_APP)
@@ -180,7 +181,8 @@ class ShelterService : Service() {
                 if (mIsProfileOwner) {
                     // Essentially the same as disabling the system app; there is no
                     // way to reverse the "enableSystemApp" operation here.
-                    mPolicyManager!!.setApplicationHidden(mAdminComponent, app.packageName, true)
+                    val admin = mAdminComponent ?: return
+                    mPolicyManager!!.setApplicationHidden(admin, app.packageName, true)
                     callback!!.callback(Activity.RESULT_OK)
                 } else {
                     callback!!.callback(RESULT_CANNOT_INSTALL_SYSTEM_APP)
@@ -192,14 +194,16 @@ class ShelterService : Service() {
             if (!mIsProfileOwner) {
                 throw IllegalArgumentException("Cannot freeze app without being profile owner")
             }
-            mPolicyManager!!.setApplicationHidden(mAdminComponent, app!!.packageName, true)
+            val admin = mAdminComponent ?: return
+            mPolicyManager!!.setApplicationHidden(admin, app!!.packageName, true)
         }
 
         override fun unfreezeApp(app: ApplicationInfoWrapper?) {
             if (!mIsProfileOwner) {
                 throw IllegalArgumentException("Cannot unfreeze app without being profile owner")
             }
-            mPolicyManager!!.setApplicationHidden(mAdminComponent, app!!.packageName, false)
+            val admin = mAdminComponent ?: return
+            mPolicyManager!!.setApplicationHidden(admin, app!!.packageName, false)
         }
 
         override fun hasUsageStatsPermission(): Boolean {
@@ -218,17 +222,19 @@ class ShelterService : Service() {
             if (!mIsProfileOwner) {
                 throw IllegalStateException("Cannot access cross-profile widget providers without being profile owner")
             }
-            return mPolicyManager!!.getCrossProfileWidgetProviders(mAdminComponent)
+            val admin = mAdminComponent ?: return emptyList()
+            return mPolicyManager!!.getCrossProfileWidgetProviders(admin) ?: emptyList()
         }
 
         override fun setCrossProfileWidgetProviderEnabled(pkgName: String, enabled: Boolean): Boolean {
             if (!mIsProfileOwner) {
                 throw IllegalStateException("Cannot access cross-profile widget providers without being profile owner")
             }
+            val admin = mAdminComponent ?: return false
             return if (enabled) {
-                mPolicyManager!!.addCrossProfileWidgetProvider(mAdminComponent, pkgName)
+                mPolicyManager!!.addCrossProfileWidgetProvider(admin, pkgName)
             } else {
-                mPolicyManager!!.removeCrossProfileWidgetProvider(mAdminComponent, pkgName)
+                mPolicyManager!!.removeCrossProfileWidgetProvider(admin, pkgName)
             }
         }
 
@@ -243,7 +249,8 @@ class ShelterService : Service() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                 throw IllegalStateException("Cross-profile packages support is only available on Android 11 and later")
             }
-            return ArrayList(mPolicyManager!!.getCrossProfilePackages(mAdminComponent))
+            val admin = mAdminComponent ?: return emptyList()
+            return ArrayList(mPolicyManager!!.getCrossProfilePackages(admin))
         }
 
         override fun setCrossProfilePackages(packages: MutableList<String>?) {
@@ -253,7 +260,8 @@ class ShelterService : Service() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                 throw IllegalStateException("Cross-profile packages support is only available on Android 11 and later")
             }
-            mPolicyManager!!.setCrossProfilePackages(mAdminComponent, HashSet(packages ?: emptyList()))
+            val admin = mAdminComponent ?: return
+            mPolicyManager!!.setCrossProfilePackages(admin, HashSet(packages ?: emptyList()))
         }
     }
 
@@ -285,7 +293,8 @@ class ShelterService : Service() {
     }
 
     private fun isHidden(packageName: String): Boolean {
-        return mIsProfileOwner && mPolicyManager!!.isApplicationHidden(mAdminComponent, packageName)
+        val admin = mAdminComponent ?: return false
+        return mIsProfileOwner && (mPolicyManager?.isApplicationHidden(admin, packageName) == true)
     }
 
     private fun setForeground() {

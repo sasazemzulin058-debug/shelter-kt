@@ -243,7 +243,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
         } catch (e: RemoteException) {
             return null
         }
-        includeFile(result, fileInfo as? Map<String, Serializable>)
+        includeFile(result, fileInfo)
         return result
     }
 
@@ -265,7 +265,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
             DocumentsContract.buildDocumentUri(AUTHORITY, parentDocumentId)
         )
         for (file in files ?: emptyList()) {
-            includeFile(result, file as? Map<String, Serializable>)
+            includeFile(result, file)
         }
         return result
     }
@@ -346,7 +346,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
         }
     }
 
-    private fun includeFile(cursor: MatrixCursor, fileInfo: Map<String, Serializable>?) {
+    private fun includeFile(cursor: MatrixCursor, fileInfo: Map<String, Any?>?) {
         if (fileInfo == null) return
         val row = cursor.newRow()
         for (col in DEFAULT_DOCUMENT_PROJECTION) {

@@ -4,12 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.core.toMutablePreferences
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -102,9 +103,8 @@ class SettingsStore(private val context: Context) {
     fun syncSetIntByName(name: String, value: Int) {
         when (val key = nameToKey[name]) {
             is Preferences.Key<*> -> writePrefs { prefs ->
-                when (key) {
-                    Keys.AUTO_FREEZE_DELAY -> prefs[Keys.AUTO_FREEZE_DELAY] = value.toLong()
-                    else -> Unit
+                if (key == Keys.AUTO_FREEZE_DELAY) {
+                    prefs[Keys.AUTO_FREEZE_DELAY] = value.toLong()
                 }
             }
             else -> Unit
@@ -173,7 +173,7 @@ class SettingsStore(private val context: Context) {
 }
 
 /** Legacy SharedPreferences "prefs" -> DataStore migration using the original literal names. */
-private class LegacyPrefsMigration(private val legacy: SharedPreferences) : DataMigration<Preferences> {
+private class LegacyPrefsMigration(private val context: Context) : DataMigration<Preferences> {
 
     private val legacyNames = listOf(
         "is_setting_up", "has_setup", "cross_profile_file_chooser", "auto_freeze_service",
@@ -181,57 +181,63 @@ private class LegacyPrefsMigration(private val legacy: SharedPreferences) : Data
         "payment_stub", "auto_freeze_list_work_profile",
     )
 
-    override suspend fun shouldMigrate(currentData: Preferences): Boolean =
-        legacyNames.any { legacy.contains(it) }
+    private fun getLegacy(): SharedPreferences =
+        context.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+
+    override suspend fun shouldMigrate(currentData: Preferences): Boolean {
+        val legacy = getLegacy()
+        return legacyNames.any { legacy.contains(it) }
+    }
 
     override suspend fun migrate(currentData: Preferences): Preferences {
-        val out = currentData.toMutablePreferences()
+        val legacy = getLegacy()
+        val mutable = currentData.toMutablePreferences()
         // Copy each known value unless the target key is already present (DataStore wins).
-        if (!out.contains(SettingsStore.Keys.IS_SETTING_UP)) {
-            out[SettingsStore.Keys.IS_SETTING_UP] = legacy.getBoolean("is_setting_up", false)
+        if (!mutable.contains(SettingsStore.Keys.IS_SETTING_UP)) {
+            mutable[SettingsStore.Keys.IS_SETTING_UP] = legacy.getBoolean("is_setting_up", false)
         }
-        if (!out.contains(SettingsStore.Keys.HAS_SETUP)) {
-            out[SettingsStore.Keys.HAS_SETUP] = legacy.getBoolean("has_setup", false)
+        if (!mutable.contains(SettingsStore.Keys.HAS_SETUP)) {
+            mutable[SettingsStore.Keys.HAS_SETUP] = legacy.getBoolean("has_setup", false)
         }
-        if (!out.contains(SettingsStore.Keys.CROSS_PROFILE_FILE_CHOOSER)) {
-            out[SettingsStore.Keys.CROSS_PROFILE_FILE_CHOOSER] =
+        if (!mutable.contains(SettingsStore.Keys.CROSS_PROFILE_FILE_CHOOSER)) {
+            mutable[SettingsStore.Keys.CROSS_PROFILE_FILE_CHOOSER] =
                 legacy.getBoolean("cross_profile_file_chooser", false)
         }
-        if (!out.contains(SettingsStore.Keys.AUTO_FREEZE_SERVICE)) {
-            out[SettingsStore.Keys.AUTO_FREEZE_SERVICE] = legacy.getBoolean("auto_freeze_service", false)
+        if (!mutable.contains(SettingsStore.Keys.AUTO_FREEZE_SERVICE)) {
+            mutable[SettingsStore.Keys.AUTO_FREEZE_SERVICE] = legacy.getBoolean("auto_freeze_service", false)
         }
-        if (!out.contains(SettingsStore.Keys.DONT_FREEZE_FOREGROUND)) {
-            out[SettingsStore.Keys.DONT_FREEZE_FOREGROUND] =
+        if (!mutable.contains(SettingsStore.Keys.DONT_FREEZE_FOREGROUND)) {
+            mutable[SettingsStore.Keys.DONT_FREEZE_FOREGROUND] =
                 legacy.getBoolean("dont_freeze_foreground", false)
         }
-        if (!out.contains(SettingsStore.Keys.BLOCK_CONTACTS_SEARCHING)) {
-            out[SettingsStore.Keys.BLOCK_CONTACTS_SEARCHING] =
+        if (!mutable.contains(SettingsStore.Keys.BLOCK_CONTACTS_SEARCHING)) {
+            mutable[SettingsStore.Keys.BLOCK_CONTACTS_SEARCHING] =
                 legacy.getBoolean("block_contacts_searching", false)
         }
-        if (!out.contains(SettingsStore.Keys.PAYMENT_STUB)) {
-            out[SettingsStore.Keys.PAYMENT_STUB] = legacy.getBoolean("payment_stub", false)
+        if (!mutable.contains(SettingsStore.Keys.PAYMENT_STUB)) {
+            mutable[SettingsStore.Keys.PAYMENT_STUB] = legacy.getBoolean("payment_stub", false)
         }
-        if (!out.contains(SettingsStore.Keys.AUTO_FREEZE_DELAY)) {
-            out[SettingsStore.Keys.AUTO_FREEZE_DELAY] = legacy.getInt("auto_freeze_delay", 0).toLong()
+        if (!mutable.contains(SettingsStore.Keys.AUTO_FREEZE_DELAY)) {
+            mutable[SettingsStore.Keys.AUTO_FREEZE_DELAY] = legacy.getInt("auto_freeze_delay", 0).toLong()
         }
-        if (!out.contains(SettingsStore.Keys.AUTO_FREEZE_LIST_WORK_PROFILE)) {
+        if (!mutable.contains(SettingsStore.Keys.AUTO_FREEZE_LIST_WORK_PROFILE)) {
             val rawList = legacy.getString("auto_freeze_list_work_profile", null)
             if (!rawList.isNullOrBlank()) {
-                out[SettingsStore.Keys.AUTO_FREEZE_LIST_WORK_PROFILE] =
+                mutable[SettingsStore.Keys.AUTO_FREEZE_LIST_WORK_PROFILE] =
                     rawList.split(LEGACY_LIST_DIVIDER).filter { it.isNotBlank() }.toSet()
             }
         }
-        return out
+        return mutable
     }
 
     override suspend fun cleanUp() {
-        legacy.edit().clear().apply()
+        getLegacy().edit().clear().apply()
     }
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "shelter_prefs",
-    produceMigrations = {
-        listOf(LegacyPrefsMigration(getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)))
+    produceMigrations = { context ->
+        listOf(LegacyPrefsMigration(context))
     },
 )

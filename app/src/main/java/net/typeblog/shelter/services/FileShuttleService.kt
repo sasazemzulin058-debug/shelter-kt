@@ -35,7 +35,7 @@ import java.io.Serializable
 class FileShuttleService : Service() {
 
     companion object {
-        private const val TIMEOUT = 10_000L
+        const val TIMEOUT = 10_000L
     }
 
     // Bounded thumbnail pipe writes run off these threads; the service-owned scope

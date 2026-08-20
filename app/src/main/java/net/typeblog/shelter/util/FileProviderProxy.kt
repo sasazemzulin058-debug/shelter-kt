@@ -32,7 +32,7 @@ class FileProviderProxy : FileProvider() {
         }
     }
 
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         if (uri.path.orEmpty().startsWith(FORWARD_PATH_PREFIX) && sProxy != null) {
             // If we are now inside FORWARD_PATH_PREFIX, forward the request to
             // the UriForwardProxy. Returns null on failure, matching the remote

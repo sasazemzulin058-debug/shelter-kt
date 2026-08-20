@@ -68,14 +68,15 @@ class FreezeService : Service() {
             mScreenLockTime = System.currentTimeMillis()
             scope.launch {
                 val prefs = settingsStore.data.first()
-                val skipForeground = prefs[SettingsStore.Keys.SKIP_FOREGROUND] ?: false
+                val skipForeground = prefs[SettingsStore.Keys.DONT_FREEZE_FOREGROUND] ?: false
                 val delaySeconds = (prefs[SettingsStore.Keys.AUTO_FREEZE_DELAY] ?: 0L).coerceAtLeast(0L)
 
                 if (skipForeground && Utility.checkUsageStatsPermission(this@FreezeService)) {
                     val usm = getSystemService(UsageStatsManager::class.java)
-                    mUsageStats = usm.queryAndAggregateUsageStats(
+                    val statsMap = usm.queryAndAggregateUsageStats(
                         mScreenLockTime - APP_INACTIVE_TIMEOUT, mScreenLockTime
                     )
+                    mUsageStats = HashMap(statsMap)
                 }
 
                 // Delay the work so it can be canceled if the screen gets unlocked

@@ -17,7 +17,7 @@ import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.FileDescriptor
+import java.io.FileDescriptor
 import android.provider.MediaStore
 import android.widget.Toast
 import net.typeblog.shelter.R
@@ -90,7 +90,10 @@ object Utility {
         }
     }
 
-    fun drawableToBitmap(drawable: Drawable): Bitmap {
+    fun drawableToBitmap(drawable: Drawable?): Bitmap {
+        if (drawable == null) {
+            return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }
         if (drawable is BitmapDrawable) {
             return drawable.bitmap
         }

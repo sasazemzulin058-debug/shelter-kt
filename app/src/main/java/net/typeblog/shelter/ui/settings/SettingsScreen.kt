@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.typeblog.shelter.R
-
+import net.typeblog.shelter.ui.settings.SettingsViewModel.PermissionRequest
 private data class AutoFreezeDelayOption(val seconds: Int, val labelRes: Int)
 
 // 0 / 60 / 120 / 300 seconds. The supplied label resources (Immediately / 1
@@ -83,7 +83,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     onCheckedChange = viewModel::setCrossProfileFileChooser,
                 )
                 SettingsSwitchRow(
-                    title = stringResource(R.string.settings_block_contacts),
+                    title = stringResource(R.string.settings_block_contacts_searching),
                     checked = uiState.blockContactsSearching,
                     onCheckedChange = viewModel::setBlockContactsSearching,
                 )
@@ -97,17 +97,17 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             item {
                 SectionHeader("Services")
                 SettingsSwitchRow(
-                    title = stringResource(R.string.settings_auto_freeze),
+                    title = stringResource(R.string.settings_auto_freeze_service),
                     checked = uiState.autoFreezeService,
                     onCheckedChange = viewModel::setAutoFreezeService,
                 )
                 AutoFreezeDelayRow(
-                    title = stringResource(R.string.settings_freeze_delay),
+                    title = stringResource(R.string.settings_auto_freeze_delay),
                     selectedSeconds = uiState.autoFreezeDelaySeconds,
                     onSelect = viewModel::setAutoFreezeDelay,
                 )
                 SettingsSwitchRow(
-                    title = stringResource(R.string.settings_skip_foreground),
+                    title = stringResource(R.string.settings_dont_freeze_foreground),
                     checked = uiState.skipForeground,
                     onCheckedChange = viewModel::setSkipForeground,
                 )
