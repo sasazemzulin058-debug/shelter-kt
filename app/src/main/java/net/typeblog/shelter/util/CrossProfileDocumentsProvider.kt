@@ -237,15 +237,25 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
 
     override fun queryDocument(documentId: String, projection: Array<String>?): Cursor? {
         ensureServiceBound()
-        val result = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
         val fileInfo = try {
-            mService?.loadFileMeta(documentId.sanitizeDocumentPath())
+            val raw = mService?.loadFileMeta(documentId.sanitizeDocumentPath())
+            if (raw != null) {
+                val typed = HashMap<String, Any?>()
+                for ((k, v) in raw) {
+                    if (k is String) {
+                        typed[k] = v
+                    }
+                }
+                typed
+            } else {
+                null
+            }
         } catch (e: RemoteException) {
             return null
         }
+        val result = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
         includeFile(result, fileInfo)
         return result
-    }
 
     override fun queryChildDocuments(
         parentDocumentId: String,
@@ -254,7 +264,22 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
     ): Cursor? {
         ensureServiceBound()
         val files = try {
-            mService?.loadFiles(parentDocumentId.sanitizeDocumentPath())
+            val rawList = mService?.loadFiles(parentDocumentId.sanitizeDocumentPath())
+            val typedList = ArrayList<Map<String, Any?>>()
+            if (rawList != null) {
+                for (item in rawList) {
+                    if (item is Map<*, *>) {
+                        val typed = HashMap<String, Any?>()
+                        for ((k, v) in item) {
+                            if (k is String) {
+                                typed[k] = v
+                            }
+                        }
+                        typedList.add(typed)
+                    }
+                }
+            }
+            typedList
         } catch (e: RemoteException) {
             return null
         }
@@ -264,7 +289,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
             appContext.contentResolver,
             DocumentsContract.buildDocumentUri(AUTHORITY, parentDocumentId)
         )
-        for (file in files ?: emptyList()) {
+        for (file in files) {
             includeFile(result, file)
         }
         return result

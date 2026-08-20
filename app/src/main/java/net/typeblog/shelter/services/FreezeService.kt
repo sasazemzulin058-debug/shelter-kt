@@ -69,7 +69,7 @@ class FreezeService : Service() {
             scope.launch {
                 val prefs = settingsStore.data.first()
                 val skipForeground = prefs[SettingsStore.Keys.DONT_FREEZE_FOREGROUND] ?: false
-                val delaySeconds = (prefs[SettingsStore.Keys.AUTO_FREEZE_DELAY] ?: 0L).coerceAtLeast(0L)
+                val delaySeconds = ((prefs[SettingsStore.Keys.AUTO_FREEZE_DELAY] ?: 0) as Number).toLong().coerceAtLeast(0L)
 
                 if (skipForeground && Utility.checkUsageStatsPermission(this@FreezeService)) {
                     val usm = getSystemService(UsageStatsManager::class.java)
@@ -83,7 +83,7 @@ class FreezeService : Service() {
                 // before the delay passes.
                 mAlarmManager!!.set(
                     AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + delaySeconds * 1000,
+                    System.currentTimeMillis() + delaySeconds * 1000L,
                     null, mFreezeWork, null
                 )
                 registerExportedReceiver(mUnlockReceiver, Intent.ACTION_SCREEN_ON)

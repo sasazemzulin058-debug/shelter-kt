@@ -141,14 +141,16 @@ class AppRepository(
             val callback = object : IGetAppsCallback.Stub() {
                 override fun callback(apps: List<ApplicationInfoWrapper>) {
                     if (!guard.compareAndSet(false, true)) return
-                    cont.resume(apps)
+                    if (cont.isActive) cont.resume(apps)
                 }
             }
             cont.invokeOnCancellation { guard.set(true) }
             try {
                 service.getApps(callback, showAll)
             } catch (e: RemoteException) {
-                if (guard.compareAndSet(false, true)) cont.resumeWithException(ServiceUnavailableException(e))
+                if (guard.compareAndSet(false, true)) {
+                    if (cont.isActive) cont.resumeWithException(ServiceUnavailableException(e))
+                }
             }
         }
 
@@ -158,14 +160,16 @@ class AppRepository(
             val callback = object : ILoadIconCallback.Stub() {
                 override fun callback(icon: Bitmap) {
                     if (!guard.compareAndSet(false, true)) return
-                    cont.resume(icon)
+                    if (cont.isActive) cont.resume(icon)
                 }
             }
             cont.invokeOnCancellation { guard.set(true) }
             try {
                 service.loadIcon(wrapper, callback)
             } catch (e: RemoteException) {
-                if (guard.compareAndSet(false, true)) cont.resumeWithException(ServiceUnavailableException(e))
+                if (guard.compareAndSet(false, true)) {
+                    if (cont.isActive) cont.resumeWithException(ServiceUnavailableException(e))
+                }
             }
         }
 
@@ -175,14 +179,16 @@ class AppRepository(
             val callback = object : IAppInstallCallback.Stub() {
                 override fun callback(result: Int) {
                     if (!guard.compareAndSet(false, true)) return
-                    cont.resume(result)
+                    if (cont.isActive) cont.resume(result)
                 }
             }
             cont.invokeOnCancellation { guard.set(true) }
             try {
                 launch(callback)
             } catch (e: RemoteException) {
-                if (guard.compareAndSet(false, true)) cont.resumeWithException(ServiceUnavailableException(e))
+                if (guard.compareAndSet(false, true)) {
+                    if (cont.isActive) cont.resumeWithException(ServiceUnavailableException(e))
+                }
             }
         }
 

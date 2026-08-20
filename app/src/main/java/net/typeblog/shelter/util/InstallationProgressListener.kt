@@ -20,12 +20,14 @@ class InstallationProgressListener(
     private var mProgress: ProgressBar? = null
 
     init {
+        val layoutId = activity.resources.getIdentifier("progress_dialog", "layout", activity.packageName)
+        val progressId = activity.resources.getIdentifier("progress", "id", activity.packageName)
         val layout = LayoutInflater.from(activity).inflate(
-            R.layout.progress_dialog,
+            layoutId,
             activity.window.decorView as ViewGroup?,
             false
         ) as ViewGroup
-        mProgress = layout.findViewById(R.id.progress)
+        mProgress = layout.findViewById(progressId)
         mDialog = AlertDialog.Builder(activity)
             .setCancelable(false)
             .setTitle(R.string.app_installing)

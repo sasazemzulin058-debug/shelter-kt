@@ -38,8 +38,8 @@ class ApplicationInfoWrapper : Parcelable {
     val sourceDir: String
         get() = mInfo!!.sourceDir
 
-    @TargetApi(Build.VERSION_CODES.O)
     val splitApks: Array<String>?
+        @TargetApi(Build.VERSION_CODES.O)
         get() = mInfo!!.splitSourceDirs
 
     // NOTE: This does not relate to the "freezing" feature in Shelter

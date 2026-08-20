@@ -30,6 +30,8 @@
     <string name="setup_permissions_desc">Shelter needs device admin permissions to manage the work profile.</string>
     <string name="setup_compatibility_title">Compatibility</string>
     <string name="setup_compatibility_desc">Some devices may have limited Work Profile support. If you experience issues, please check the documentation.</string>
+    <string name="setup_ready_title">Ready to setup</string>
+    <string name="setup_ready_desc">You are now ready to set up Shelter. Press the button below to begin the creation of your Work Profile.</string>
     <string name="setup_provisioning">Setting up work profile…</string>
     <string name="setup_complete">Setup complete!</string>
     <string name="setup_failed">Setup failed. Your device may not support Work Profiles.</string>
