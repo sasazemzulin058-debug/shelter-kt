@@ -8,9 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.core.content.ContextCompat
-import dagger.hilt.android.AndroidEntryPoint
 import net.typeblog.shelter.data.settings.SettingsStore
-import javax.inject.Inject
 
 /**
  * Thin cross-profile proxy activity. It owns only:
@@ -22,16 +20,14 @@ import javax.inject.Inject
  *
  * Every concrete action is implemented in [CrossProfileAction].
  */
-@AndroidEntryPoint
 class DummyActivity : Activity() {
 
-    @Inject
-    lateinit var auth: AuthManager
-
-    @Inject
-    lateinit var settings: SettingsStore
+    private lateinit var auth: AuthManager
+    private lateinit var settings: SettingsStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        auth = AuthManager(this)
+        settings = SettingsStore(this)
         super.onCreate(savedInstanceState)
 
         if (ProfileManager.isProfileOwner(this)) {
