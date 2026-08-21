@@ -14,12 +14,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import net.typeblog.shelter.R
 import net.typeblog.shelter.data.settings.SettingsStore
 import net.typeblog.shelter.profile.Actions
@@ -38,16 +32,20 @@ class FreezeService : Service() {
         private val sAppToFreeze = ArrayList<String>()
 
         @JvmStatic
-        @Synchronized
         fun registerAppToFreeze(app: String) {
-            if (!sAppToFreeze.contains(app)) {
-                sAppToFreeze.add(app)
+            synchronized(FreezeService::class.java) {
+                if (!sAppToFreeze.contains(app)) {
+                    sAppToFreeze.add(app)
+                }
             }
         }
 
         @JvmStatic
-        @Synchronized
-        fun hasPendingAppToFreeze(): Boolean = sAppToFreeze.isNotEmpty()
+        fun hasPendingAppToFreeze(): Boolean {
+            synchronized(FreezeService::class.java) {
+                return sAppToFreeze.isNotEmpty()
+            }
+        }
 
         // An app being inactive for this amount of time will be frozen.
         private const val APP_INACTIVE_TIMEOUT = 1_000L
@@ -55,7 +53,6 @@ class FreezeService : Service() {
         private const val NOTIFICATION_ID = 0xe49c0
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var settingsStore: SettingsStore
 
     // The receiver of the screen-off event.
@@ -65,28 +62,34 @@ class FreezeService : Service() {
             // for "skipping foreground apps": no app is foreground after the screen
             // is locked.
             mScreenLockTime = System.currentTimeMillis()
-            scope.launch {
-                val prefs = settingsStore.data.first()
-                val skipForeground = prefs[SettingsStore.Keys.DONT_FREEZE_FOREGROUND] ?: false
-                val delaySeconds = ((prefs[SettingsStore.Keys.AUTO_FREEZE_DELAY] ?: 0) as Number).toLong().coerceAtLeast(0L)
 
-                if (skipForeground && Utility.checkUsageStatsPermission(this@FreezeService)) {
-                    val usm = getSystemService(UsageStatsManager::class.java)
-                    val statsMap = usm.queryAndAggregateUsageStats(
-                        mScreenLockTime - APP_INACTIVE_TIMEOUT, mScreenLockTime
-                    )
-                    mUsageStats = HashMap(statsMap)
-                }
+            // Read the two settings synchronously (bounded DataStore facade) so
+            // the alarm is armed and the unlock receiver registered before this
+            // callback returns, exactly like the original blocking implementation.
+            val skipForeground = settingsStore.syncGetBoolean(SettingsStore.Keys.DONT_FREEZE_FOREGROUND)
+            val delaySeconds = settingsStore.syncGetLong(SettingsStore.Keys.AUTO_FREEZE_DELAY)
 
-                // Delay the work so it can be canceled if the screen gets unlocked
-                // before the delay passes.
-                mAlarmManager!!.set(
-                    AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + delaySeconds * 1000L,
-                    null, mFreezeWork, null
+            if (skipForeground && Utility.checkUsageStatsPermission(this@FreezeService)) {
+                val usm = getSystemService(UsageStatsManager::class.java)
+                val statsMap = usm.queryAndAggregateUsageStats(
+                    mScreenLockTime - APP_INACTIVE_TIMEOUT, mScreenLockTime
                 )
-                registerExportedReceiver(mUnlockReceiver, Intent.ACTION_SCREEN_ON)
+                mUsageStats = HashMap(statsMap)
             }
+
+            // Delay the work so it can be canceled if the screen gets unlocked
+            // before the delay passes.
+            mAlarmManager!!.set(
+                AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + delaySeconds * 1000L,
+                null, mFreezeWork, null
+            )
+            // Re-arm the unlock receiver for this cycle; unregister any stale one
+            // left over from a previous cycle that ended with the screen turning
+            // back on (the original never unregistered it on the cancel path, which
+            // silently accumulated duplicate registrations across cycles).
+            unregisterReceiverSafely(mUnlockReceiver)
+            registerExportedReceiver(mUnlockReceiver, Intent.ACTION_SCREEN_ON)
         }
     }
 
@@ -150,7 +153,6 @@ class FreezeService : Service() {
         super.onDestroy()
         unregisterReceiverSafely(mLockReceiver)
         unregisterReceiverSafely(mUnlockReceiver)
-        scope.cancel()
     }
 
     override fun onBind(intent: Intent): IBinder? = null

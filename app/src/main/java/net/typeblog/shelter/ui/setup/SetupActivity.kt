@@ -115,6 +115,9 @@ class SetupActivity : ComponentActivity() {
         // The user may have aborted provisioning before without clearing data,
         // leaving stale auth keys that would make us believe we can authenticate.
         authManager.reset()
+        // Enter the explicit provisioning state so the counterpart may bootstrap
+        // a shared secret against this profile.
+        authManager.markBootstrapAuthorized()
         try {
             provisionProfile.launch(Unit)
         } catch (_: ActivityNotFoundException) {
@@ -134,6 +137,9 @@ class SetupActivity : ComponentActivity() {
             settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
             step = Step.ACTION_REQUIRED
         } else {
+            // Provisioning failed/cancelled: revoke the bootstrap authorization
+            // so a stale gate cannot be abused later. A retry re-authorizes.
+            authManager.reset()
             step = Step.FAILED
         }
     }

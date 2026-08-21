@@ -35,7 +35,7 @@ object Actions {
 
     /**
      * Actions only callable from within the same process, using the one-shot
-     * short-window local bypass (see AuthManager.markLocalBypass).
+     * short-window token bypass (see AuthManager.registerSameProcess).
      */
     val SAME_PROCESS_ACTIONS = setOf(
         INSTALL_PACKAGE,

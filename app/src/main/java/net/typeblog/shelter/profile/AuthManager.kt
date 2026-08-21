@@ -33,9 +33,11 @@ import kotlin.math.abs
  *    Expired, replayed, malformed or unsigned-but-not-whitelisted intents are
  *    rejected.
  *
- * A one-shot 5-second bypass exists for the three original same-process
- * actions (INSTALL_PACKAGE, UNINSTALL_PACKAGE, UNFREEZE_AND_LAUNCH); it is
- * consumed on first use.
+ * A one-shot same-process bypass exists for the three original same-process
+ * actions (INSTALL_PACKAGE, UNINSTALL_PACKAGE, UNFREEZE_AND_LAUNCH). It is a
+ * process-local random token bound to the exact action and a digest of the
+ * intent's primitive extras, valid for at most 5 seconds and consumed
+ * atomically on first use — never a bare timestamp/boolean global grant.
  */
 class AuthManager(context: Context) {
 
@@ -45,36 +47,88 @@ class AuthManager(context: Context) {
     private var cachedSecret: ByteArray? = null
     private val seenNonces = LinkedHashMap<String, Boolean>()
 
-    // One-shot same-process bypass state (process-local, like the original).
-    @Volatile
-    private var bypassUntil: Long = 0L
-
-    @Volatile
-    private var bypassConsumed: Boolean = false
+    // Provisioning-authorization gate: whether this profile has entered an
+    // explicit setup/provisioning state and may therefore accept a TOFU
+    // bootstrap key or a FINALIZE_PROVISION. Set only from provisioning
+    // entry points (BIND_DEVICE_ADMIN-protected or the setup wizard).
+    private var cachedBootstrapAuth: Boolean? = null
+    private val seenBootstrapNonces = LinkedHashSet<String>()
 
     companion object {
         private const val PREFS_NAME = "shelter_auth"
         private const val PREF_AUTH_KEY = "auth_key"
+        private const val PREF_BOOTSTRAP_AUTH = "bootstrap_authorized"
 
         // Android Keystore wrapping key (profile-local, never crosses the boundary).
         private const val WRAP_ALIAS = "shelter_auth_wrap_key"
 
         private const val PROTOCOL_VERSION = 1
         private const val SIGNATURE_WINDOW_MS = 30_000L // 30 seconds validity
+        private const val BOOTSTRAP_WINDOW_MS = 60_000L  // 60s to complete a bootstrap exchange
         private const val NONCE_CACHE_CAP = 1024
 
-        // Intent extras for the signed path.
-        private const val EXTRA_AUTH_KEY = "auth_key"
-        private const val EXTRA_VERSION = "auth_version"
-        private const val EXTRA_TIMESTAMP = "timestamp"
-        private const val EXTRA_NONCE = "auth_nonce"
-        private const val EXTRA_SIGNATURE = "signature"
+// Intent extras for the signed path. SIGNATURE/NONCE/AUTH_KEY are public so
+        // receiver-side gates (e.g. FileShuttle binder handoff) can require
+        // steady-state HMAC presence and reject TOFU-seeded intents without
+        // duplicating string literals.
+        const val EXTRA_AUTH_KEY = "auth_key"
+        const val EXTRA_VERSION = "auth_version"
+        const val EXTRA_TIMESTAMP = "timestamp"
+        const val EXTRA_NONCE = "auth_nonce"
+        const val EXTRA_SIGNATURE = "signature"
+        private const val EXTRA_BOOTSTRAP_NONCE = "bootstrap_nonce"
+
+        // Explicit marker an intent must carry to be allowed to trigger a TOFU
+        // bootstrap exchange or finalization. Set by signIntent() bootstrap
+        // emission and by the finalize senders (FinalizeActivity /
+        // DeviceAdminReceiver); combined with the persisted provisioning gate.
+        const val EXTRA_BOOTSTRAP_ALLOWED = "bootstrap_allowed"
 
         // Extras excluded from the canonical payload and from delivering a fresh key.
         private val RESERVED_EXTRAS = setOf(
             EXTRA_AUTH_KEY, EXTRA_VERSION, EXTRA_TIMESTAMP,
-            EXTRA_NONCE, EXTRA_SIGNATURE,
+            EXTRA_NONCE, EXTRA_SIGNATURE, EXTRA_BOOTSTRAP_NONCE,
+            EXTRA_BOOTSTRAP_ALLOWED,
         )
+
+        // Extras carrying the one-shot same-process token grant; excluded from
+        // the token-bound digest so registration-time and check-time digests agree.
+        private const val EXTRA_SAME_PROCESS = "is_same_process"
+        private const val EXTRA_SAME_PROCESS_TOKEN = "is_same_process_token"
+        private val SAME_PROCESS_EXCLUDED_EXTRAS =
+            RESERVED_EXTRAS + setOf(EXTRA_SAME_PROCESS, EXTRA_SAME_PROCESS_TOKEN)
+
+        // One-shot same-process token registry (process-local, like the original
+        // bypass). A grant is a random token bound to the exact action and a
+        // digest of the intent's primitive extras; it expires after 5 seconds
+        // and is consumed atomically on first verification.
+        private data class SameProcessGrant(
+            val action: String,
+            val digest: String,
+            val expiresAt: Long,
+        )
+        private const val SAME_PROCESS_WINDOW_MS = 5_000L
+        private const val SAME_PROCESS_GRANT_CAP = 16
+        private val sameProcessGrants = LinkedHashMap<String, SameProcessGrant>()
+
+        // Actions that may be authenticated via a bootstrap exchange. Everything
+        // requiring a shared secret is eligible except the public-entry actions
+        // and the PackageInstaller callback (which uses its own session nonce).
+        private val BOOTSTRAP_ACTIONS: Set<String> by lazy {
+            val allSigned = Actions.SAME_PROCESS_ACTIONS +
+                listOf(
+                    Actions.START_SERVICE,
+                    Actions.TRY_START_SERVICE,
+                    Actions.START_FILE_SHUTTLE,
+                    Actions.START_FILE_SHUTTLE_2,
+                    Actions.UNFREEZE_AND_LAUNCH,
+                    Actions.PUBLIC_FREEZE_ALL,
+                    Actions.PUBLIC_UNFREEZE_AND_LAUNCH,
+                    Actions.FREEZE_ALL_IN_LIST,
+                    Actions.SYNCHRONIZE_PREFERENCE,
+                )
+            allSigned - Actions.UNSIGNED_ACTIONS
+        }
 
         private val random = SecureRandom()
     }
@@ -181,25 +235,86 @@ class AuthManager(context: Context) {
     // ------------------------------------------------------------------ public API
 
     /**
-     * Register that an intent will be sent to this same process without a
-     * signature. Allowed for the next 5 seconds and consumed on first use.
+     * Register that [intent] will be delivered to the counterpart same-process
+     * activity without a signature. Arms a process-local one-shot random token
+     * bound to the exact action and a digest of the intent's primitive extras,
+     * stamps the marker extras onto [intent], and returns the token. The grant
+     * is valid for at most 5 seconds and is consumed atomically by
+     * [verifySameProcess]. Process-local and unpredictable, so a cross-process
+     * attacker cannot fabricate the bypass.
      */
-    fun markLocalBypass() {
-        bypassUntil = System.currentTimeMillis() + 5_000L
-        bypassConsumed = false
+    @JvmStatic
+    @Synchronized
+    fun registerSameProcess(intent: Intent): String {
+        // Bound the registry: drop everything on overflow so a buggy caller
+        // cannot grow it without limit (the newest grant always survives).
+        if (sameProcessGrants.size >= SAME_PROCESS_GRANT_CAP) sameProcessGrants.clear()
+        sameProcessGrants.entries.removeAll { it.value.expiresAt <= System.currentTimeMillis() }
+        val now = System.currentTimeMillis()
+        val token = java.util.UUID.randomUUID().toString()
+        sameProcessGrants[token] = SameProcessGrant(
+            action = intent.action ?: "",
+            digest = sameProcessDigest(intent),
+            expiresAt = now + SAME_PROCESS_WINDOW_MS,
+        )
+        intent.putExtra(EXTRA_SAME_PROCESS, true)
+        intent.putExtra(EXTRA_SAME_PROCESS_TOKEN, token)
+        return token
+    }
+
+    /**
+     * Mark this profile as being in an explicit provisioning/bootstrap state,
+     * authorizing a single TOFU key exchange and FINALIZE_PROVISION acceptance.
+     * Called only from provisioning entry points (the setup wizard and the
+     * BIND_DEVICE_ADMIN-protected finalize receiver/activity).
+     */
+    fun markBootstrapAuthorized() {
+        prefs.edit().putBoolean(PREF_BOOTSTRAP_AUTH, true).apply()
+        cachedBootstrapAuth = true
+        seenBootstrapNonces.clear()
+    }
+
+    /** Whether this profile has entered (and not yet reset) provisioning state. */
+    fun isBootstrapAuthorized(): Boolean {
+        cachedBootstrapAuth?.let { return it }
+        return prefs.getBoolean(PREF_BOOTSTRAP_AUTH, false).also { cachedBootstrapAuth = it }
+    }
+
+    /**
+     * Close the provisioning/bootstrap gate for good. Called once a shared
+     * secret provably exists in this profile — a TOFU key accepted from the
+     * counterpart or a steady-state HMAC verified — so the TOFU and
+     * FINALIZE_PROVISION acceptance windows do not stay open indefinitely
+     * after setup. A past provisioning state must never keep accepting
+     * key/finalize injection from a later same-profile attacker.
+     */
+    private fun disarmBootstrapAuth() {
+        cachedBootstrapAuth = false
+        prefs.edit().remove(PREF_BOOTSTRAP_AUTH).apply()
+        seenBootstrapNonces.clear()
     }
 
     /**
      * Sign an intent for cross-profile transfer. If we have no shared secret
-     * yet, bootstrap one and send it verbatim via the `auth_key` extra.
+     * yet, bootstrap one — but ONLY while provisioning is authorized, and only
+     * for an action that actually requires a shared secret. Otherwise the
+     * intent stays unsigned and is rejected by the receiver (fail closed).
      */
     fun signIntent(intent: Intent): Intent = intent.apply {
         val secret = sharedSecret()
         if (secret == null) {
-            val fresh = ByteArray(32).also { random.nextBytes(it) }
-            putExtra(EXTRA_AUTH_KEY, Base64.encodeToString(fresh, Base64.NO_WRAP))
-            putExtra(EXTRA_VERSION, PROTOCOL_VERSION)
-            storeSecret(fresh)
+            val action = intent.action
+            if (isBootstrapAuthorized() && action != null && action in BOOTSTRAP_ACTIONS) {
+                val fresh = ByteArray(32).also { random.nextBytes(it) }
+                putExtra(EXTRA_AUTH_KEY, Base64.encodeToString(fresh, Base64.NO_WRAP))
+                putExtra(EXTRA_VERSION, PROTOCOL_VERSION)
+                putExtra(EXTRA_BOOTSTRAP_NONCE, java.util.UUID.randomUUID().toString())
+                putExtra(EXTRA_BOOTSTRAP_ALLOWED, true)
+                putExtra(EXTRA_TIMESTAMP, System.currentTimeMillis())
+                storeSecret(fresh)
+            }
+            // Not authorized (or not a bootstrapable action): fail closed by
+            // leaving the intent unsigned; the receiver will reject it.
         } else {
             val action = intent.action
             if (action != null) {
@@ -224,25 +339,63 @@ class AuthManager(context: Context) {
     fun verifyIntent(intent: Intent): Boolean {
         val action = intent.action ?: return false
 
+        // FINALIZE_PROVISION mutates provisioning state. It is NOT allowed to
+        // ride the generic unsigned path: it requires BOTH the explicit
+        // bootstrap_allowed marker (bootstrap emission sets it via signIntent;
+        // the finalize senders must set it explicitly) AND an armed persisted
+        // provisioning state. That state is armed only by provisioning entry
+        // points — the BIND_DEVICE_ADMIN-protected FinalizeActivity and
+        // DeviceAdminReceiver (invoked solely by the provisioning framework)
+        // and the non-exported SetupActivity — so an arbitrary app can neither
+        // arm it nor forge a finalize. The marker is disarmed as soon as a
+        // shared secret provably exists (see [disarmBootstrapAuth]).
+        if (action == Actions.FINALIZE_PROVISION) {
+            return isBootstrapAuthorized() &&
+                intent.getBooleanExtra(EXTRA_BOOTSTRAP_ALLOWED, false)
+        }
+
         // Whitelisted public actions need no signature.
         if (action in Actions.UNSIGNED_ACTIONS) return true
 
-        // One-shot same-process bypass (original three actions only).
-        if (verifySameProcess(action)) return true
+        // One-shot same-process token bypass (original three actions only).
+        if (verifySameProcess(intent)) return true
 
         val secret = sharedSecret()
         if (secret == null) {
-            // TOFU bootstrap: accept and store the FIRST delivered key only.
-            val delivered = intent.getStringExtra(EXTRA_AUTH_KEY)
-            if (delivered != null && intent.getIntExtra(EXTRA_VERSION, 0) == PROTOCOL_VERSION) {
-                val decoded = runCatching {
-                    Base64.decode(delivered, Base64.NO_WRAP)
-                }.getOrNull() ?: return false
-                if (decoded.size != 32) return false
-                storeSecret(decoded)
-                return true
-            }
-            return false
+            // TOFU bootstrap: accept the FIRST delivered key only when (a) this
+            // profile is in an explicit provisioning state, (b) the action is one
+            // that genuinely requires a shared secret, and (c) the exchange carries
+            // a fresh nonce within the bootstrap window. This blocks arbitrary
+            // exported intents from seeding a hostile shared secret.
+            if (!isBootstrapAuthorized()) return false
+            if (action !in BOOTSTRAP_ACTIONS) return false
+            // The sender must have explicitly declared this a bootstrap
+            // exchange; a generic unsigned intent must fail closed.
+            if (!intent.getBooleanExtra(EXTRA_BOOTSTRAP_ALLOWED, false)) return false
+
+            val delivered = intent.getStringExtra(EXTRA_AUTH_KEY) ?: return false
+            if (intent.getIntExtra(EXTRA_VERSION, 0) != PROTOCOL_VERSION) return false
+
+            val nonce = intent.getStringExtra(EXTRA_BOOTSTRAP_NONCE) ?: return false
+            if (nonce.isEmpty() || !seenBootstrapNonces.add(nonce)) return false
+
+            val ts = intent.getLongExtra(EXTRA_TIMESTAMP, 0L)
+            val now = System.currentTimeMillis()
+            if (ts <= 0L) return false
+            if (now - ts > BOOTSTRAP_WINDOW_MS) return false       // expired
+            if (abs(now - ts) > BOOTSTRAP_WINDOW_MS) return false  // future skew
+
+            val decoded = runCatching {
+                Base64.decode(delivered, Base64.NO_WRAP)
+            }.getOrNull() ?: return false
+            if (decoded.size != 32) return false
+            storeSecret(decoded)
+            // A key exchange completed: the provisioning/bootstrap window is
+            // over. Accepting the counterpart's key once is enough — future
+            // intents ride the HMAC path, and a past setup state must not keep
+            // accepting later key/finalize injection.
+            disarmBootstrapAuth()
+            return true
         }
 
         // Steady state: reject malformed, expired, replayed or forged intents.
@@ -269,25 +422,74 @@ class AuthManager(context: Context) {
         if (!MessageDigest.isEqual(signature, expected)) return false
 
         seenNonces[nonceKey] = true
+        // A valid signed exchange provably crosses the boundary; the shared
+        // secret is in place, so the provisioning/bootstrap gate is over.
+        disarmBootstrapAuth()
         return true
     }
 
-    private fun verifySameProcess(action: String): Boolean {
+    /**
+     * Atomically verify and consume a same-process token grant carried by
+     * [intent]. Accepts only the original same-process actions, requires the
+     * marker extras, a live grant whose action and primitive-extras digest
+     * match, and consumes the grant on success (one-shot) and on any failing
+     * match (fail closed — no retry with the same token).
+     */
+    @JvmStatic
+    @Synchronized
+    fun verifySameProcess(intent: Intent): Boolean {
+        val action = intent.action ?: return false
         if (action !in Actions.SAME_PROCESS_ACTIONS) return false
-        if (System.currentTimeMillis() > bypassUntil) return false
-        if (bypassConsumed) return false
-        // Consume the one-shot grant.
-        bypassConsumed = true
-        bypassUntil = 0L
+        if (!intent.getBooleanExtra(EXTRA_SAME_PROCESS, false)) return false
+        val token = intent.getStringExtra(EXTRA_SAME_PROCESS_TOKEN)
+        if (token.isNullOrEmpty()) return false
+
+        val grant = sameProcessGrants[token] ?: return false
+        sameProcessGrants.remove(token) // consume: one-shot, no retry
+        if (System.currentTimeMillis() > grant.expiresAt) return false
+        if (grant.action != action) return false
+        if (grant.digest != sameProcessDigest(intent)) return false
         return true
+    }
+
+    /**
+     * Canonical primitive action+extras fingerprint (sorted key=value), with
+     * the marker extras and the HMAC/bootstrap extras excluded so that
+     * registration-time and check-time digests agree.
+     */
+    private fun sameProcessDigest(intent: Intent): String {
+        val sb = StringBuilder(intent.action ?: "")
+        val extras = intent.extras
+        if (extras != null) {
+            val parts = ArrayList<String>()
+            for (key in extras.keySet()) {
+                if (key in SAME_PROCESS_EXCLUDED_EXTRAS) continue
+                val v = extras.get(key) ?: continue
+                when (v) {
+                    is String -> parts += "$key=$v"
+                    is Int -> parts += "$key=$v"
+                    is Long -> parts += "$key=$v"
+                    is Boolean -> parts += "$key=$v"
+                    is Float -> parts += "$key=$v"
+                    is Double -> parts += "$key=$v"
+                    is Array<*> -> parts += "$key=${v.joinToString(",")}"
+                }
+            }
+            parts.sort()
+            sb.append('&').append(parts.joinToString("&"))
+        }
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        return md.digest(sb.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 
     /** Forget the shared secret and reset local state (called at setup). */
     fun reset() {
         cachedSecret = null
         seenNonces.clear()
-        bypassUntil = 0L
-        bypassConsumed = true
-        prefs.edit().remove(PREF_AUTH_KEY).apply()
+        seenBootstrapNonces.clear()
+        cachedBootstrapAuth = null
+        sameProcessGrants.clear()
+        prefs.edit().remove(PREF_AUTH_KEY).remove(PREF_BOOTSTRAP_AUTH).apply()
     }
 }

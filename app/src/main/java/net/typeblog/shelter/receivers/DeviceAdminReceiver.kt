@@ -9,37 +9,47 @@ import android.content.Intent
 import android.os.Build
 import net.typeblog.shelter.R
 import net.typeblog.shelter.profile.Actions
+import net.typeblog.shelter.profile.AuthManager
 import net.typeblog.shelter.profile.DummyActivity
-import net.typeblog.shelter.util.Utility
+import net.typeblog.shelter.util.buildNotification
 
 class DeviceAdminReceiver : DeviceAdminReceiver() {
+
     companion object {
         private const val NOTIFICATION_ID = 114514
     }
 
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
         super.onProfileProvisioningComplete(context, intent)
-        // After Oreo, the activity intent ACTION_PROVISIONING_SUCCESSFUL is used
-        // for finalization; as an activity intent it is far more reliable (and
-        // less hacky) than doing it in a BroadcastReceiver. That is handled by
-        // FinalizeActivity, so ignore the event here.
+
+        // After Oreo, we use the activity intent ACTION_PROVISIONING_SUCCESSFUL
+        // for finalization. As it is an activity intent, it is way more
+        // reliable (and less hacky) than doing it in a BroadcastReceiver.
+        // This is handled by FinalizeActivity, and thus we should ignore the
+        // event here.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return
-        // Complex logic in a BroadcastReceiver is not reliable; delegate
-        // finalization to DummyActivity.
-        val launch = Intent(context.applicationContext, DummyActivity::class.java)
-        launch.action = Actions.FINALIZE_PROVISION
-        launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+
+        // Complex logic in a BroadcastReceiver is not reliable:
+        // delegate finalization to the DummyActivity.
+        val i = Intent(context.applicationContext, DummyActivity::class.java)
+        i.action = Actions.FINALIZE_PROVISION
+        i.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // Provisioning bootstrap window: authorize this finalization intent
+        // and carry the marker the DummyActivity init gate requires.
+        AuthManager(context).markBootstrapAuthorized()
+        i.putExtra(AuthManager.EXTRA_BOOTSTRAP_ALLOWED, true)
+
         // Delegate starting the activity to a notification to work around
-        // background limitations on custom OEM ROMs (MIUI / EMUI).
-        val notification = Utility.buildNotification(
-            context, true,
+        // background limitations, and to fix bugs on custom OSes like MIUI/EMUI.
+        val notification = context.buildNotification(
+            true,
             "shelter-finish-provision",
             context.getString(R.string.finish_provision_title),
             context.getString(R.string.finish_provision_desc),
             R.drawable.ic_notification_white_24dp
         )
         notification.contentIntent = PendingIntent.getActivity(
-            context, 0, launch,
+            context, 0, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         notification.flags = notification.flags or Notification.FLAG_AUTO_CANCEL

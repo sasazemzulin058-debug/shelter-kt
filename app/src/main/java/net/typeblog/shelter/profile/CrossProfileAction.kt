@@ -32,6 +32,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Real implementations of every cross-profile action handled by DummyActivity.
@@ -40,6 +41,18 @@ import java.util.UUID
  * continuation hooks live on DummyActivity.
  */
 object CrossProfileAction {
+
+    // Internal extras carried by cross-profile requests and their callbacks.
+    // "extra" holds a Bundle with a binder (service or callback);
+    // "callback" holds the Bundle with the IAppInstallCallback binder.
+    const val EXTRA_EXTRA = "extra"
+    const val EXTRA_CALLBACK = "callback"
+
+    // One-time FileShuttle callback identity: a fresh random token the requesting
+    // side generates per acquisition attempt. It is a String extra, so it is
+    // covered by the intent's HMAC payload (see AuthManager.canonicalExtras),
+    // binding each delivery to the specific authenticated request.
+    const val EXTRA_CALLBACK_TOKEN = "callback_token"
 
     // ------------------------------------------------------------------ service
 
@@ -51,7 +64,7 @@ object CrossProfileAction {
                     val data = Intent()
                     val bundle = Bundle()
                     bundle.putBinder("service", service)
-                    data.putExtra("extra", bundle)
+                    data.putExtra(EXTRA_EXTRA, bundle)
                     activity.setResult(Activity.RESULT_OK, data)
                     activity.finish()
                 }
@@ -74,29 +87,72 @@ object CrossProfileAction {
 
     fun finalizeProvision(activity: DummyActivity, settings: SettingsStore) {
         if (ProfileManager.isProfileOwner(activity)) {
+            // This branch only runs after the DummyActivity authentication gate
+            // accepted FINALIZE_PROVISION, which requires the explicit
+            // provisioning-authorization marker set only by the BIND_DEVICE_ADMIN
+            // protected finalize entry points (FinalizeActivity / the pre-O
+            // provisioning receiver). Belt and braces: refuse to forward anything
+            // that did not enter provisioning state through the platform signal.
+            if (!activity.auth.isBootstrapAuthorized()) {
+                activity.finish()
+                return
+            }
             // On pre-O the provisioning receiver notifies the parent profile after
             // policies are applied; on O+ FinalizeActivity drives activity-based flow.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 val intent = Intent(Actions.FINALIZE_PROVISION)
-                // Unsigned: the parent side accepts this public action without a signature.
+                // Unsigned: the parent side accepts this public action without a
+                // signature — but AuthManager.verifyIntent additionally requires the
+                // explicit bootstrap marker on FINALIZE intents. It must be stamped
+                // here; the parent side's own armed provisioning state (set by
+                // SetupActivity) is what proves this finalize belongs to a real
+                // setup session.
+                intent.putExtra(AuthManager.EXTRA_BOOTSTRAP_ALLOWED, true)
                 ProfileManager.transferIntentToProfileUnsigned(activity, intent)
                 activity.startActivity(intent)
             }
             activity.finish()
         } else {
-            settings.syncSetBooleanByName("has_setup", true)
-            settings.syncSetBooleanByName("is_setting_up", false)
-            val intent = Intent(Actions.ACTION_PROFILE_PROVISIONED)
-            intent.setComponent(ComponentName(activity, SetupActivity::class.java))
-            activity.startActivity(intent)
-            Toast.makeText(activity, R.string.provision_finished, Toast.LENGTH_LONG).show()
+            // Parent profile. Mutate the durable setup state ONLY while an explicit
+            // setup session is recorded:
+            //  - the parent's own SetupActivity persisted the bootstrap-authorization
+            //    marker before launching system provisioning (with IS_SETTING_UP as
+            //    the pre-O pending-finalize marker), and
+            //  - finalization has not already been applied.
+            // This makes duplicate or spoofed FINALIZE_PROVISION deliveries idempotent
+            // no-ops instead of state-flipping side effects.
+            val alreadyFinalized = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
+            val inSetupSession =
+                settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP) ||
+                    activity.auth.isBootstrapAuthorized()
+            if (!alreadyFinalized && inSetupSession) {
+                settings.syncSetBoolean(SettingsStore.Keys.HAS_SETUP, true)
+                settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, false)
+                val intent = Intent(Actions.ACTION_PROFILE_PROVISIONED)
+                intent.setComponent(ComponentName(activity, SetupActivity::class.java))
+                activity.startActivity(intent)
+                Toast.makeText(activity, R.string.provision_finished, Toast.LENGTH_LONG).show()
+            }
             activity.finish()
         }
     }
 
+    /** Install/uninstall request entry (see DummyActivity). Consumed -> true. */
+    fun dispatch(activity: Activity, intent: Intent): Boolean = when (intent.action) {
+        Actions.INSTALL_PACKAGE -> {
+            installPackage(activity)
+            true
+        }
+        Actions.UNINSTALL_PACKAGE -> {
+            uninstallPackage(activity)
+            true
+        }
+        else -> false
+    }
+
     // ------------------------------------------------------------------ install / uninstall
 
-    fun installPackage(activity: DummyActivity) {
+    fun installPackage(activity: Activity) {
         val intent = activity.intent
         var uri: Uri? = null
         if (intent.hasExtra("package")) {
@@ -135,12 +191,13 @@ object CrossProfileAction {
         StrictMode.setVmPolicy(policy)
     }
 
-    private fun installPackageQ(activity: DummyActivity, uri: Uri?, splitApks: Array<String>?) {
+    private fun installPackageQ(activity: Activity, uri: Uri?, splitApks: Array<String>?) {
         val pi = activity.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         val sessionId = pi.createSession(params)
 
         // Show progress; the listener deregisters itself once its session finishes.
+        val txNonce = beginInstallTransaction(sessionId)
         val progress = SessionProgress(activity, pi, sessionId)
         pi.registerSessionCallback(progress)
 
@@ -148,8 +205,17 @@ object CrossProfileAction {
         doInstallPackageQ(activity, uri, splitApks, session) {
             // Finished piping the streams; advertise partial progress then commit.
             session.setStagingProgress(0.1f)
+            // Explicit component + action: the PendingIntent operation stays an
+            // activity-based getActivity, and the system only ever fills status
+            // extras because the PendingIntent is mutable.
             val callbackIntent = Intent(activity, DummyActivity::class.java)
             callbackIntent.action = Actions.PACKAGEINSTALLER_CALLBACK
+            // Bind this callback to the live in-process transaction so a spoofed
+            // PACKAGEINSTALLER_CALLBACK is rejected at the receiver.
+            callbackIntent.putExtra(EXTRA_TX_NONCE, txNonce)
+            activity.intent.getBundleExtra(EXTRA_CALLBACK)?.let {
+                callbackIntent.putExtra(EXTRA_CALLBACK, it)
+            }
             val pending = android.app.PendingIntent.getActivity(
                 activity, 0, callbackIntent, android.app.PendingIntent.FLAG_MUTABLE)
             session.commit(pending.intentSender)
@@ -158,7 +224,7 @@ object CrossProfileAction {
 
     // Reads the APK streams on a background thread to keep the UI thread free.
     private fun doInstallPackageQ(
-        activity: DummyActivity,
+        activity: Activity,
         baseUri: Uri?,
         splitApks: Array<String>?,
         session: PackageInstaller.Session,
@@ -191,11 +257,17 @@ object CrossProfileAction {
         }.start()
     }
 
-    fun uninstallPackage(activity: DummyActivity) {
+    fun uninstallPackage(activity: Activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val pi = activity.packageManager.packageInstaller
             val callbackIntent = Intent(activity, DummyActivity::class.java)
             callbackIntent.action = Actions.PACKAGEINSTALLER_CALLBACK
+            // The uninstall callback's session id is only known once it arrives;
+            // the random nonce itself is the transaction identity here.
+            callbackIntent.putExtra(
+                EXTRA_TX_NONCE,
+                beginInstallTransaction(-1),
+            )
             val pending = android.app.PendingIntent.getActivity(
                 activity, 0, callbackIntent, android.app.PendingIntent.FLAG_MUTABLE)
             pi.uninstall(activity.intent.getStringExtra("package").orEmpty(), pending.intentSender)
@@ -214,20 +286,126 @@ object CrossProfileAction {
      * FileProviderProxy, delivers the IAppInstallCallback result once, then
      * finishes (unless no callback was supplied, matching the original).
      */
-    fun appInstallFinished(activity: DummyActivity, resultCode: Int) {
+    fun appInstallFinished(activity: Activity, resultCode: Int) {
         FileProviderProxy.clearForwardProxy()
 
         val intent = activity.intent
-        if (!intent.hasExtra("callback")) return
-
-        val callbackExtra = intent.getBundleExtra("callback")
-        val callback = IAppInstallCallback.Stub.asInterface(callbackExtra?.getBinder("callback"))
-        try {
-            callback.callback(resultCode)
-        } catch (_: RemoteException) {
-            // Caller went away; nothing left to do.
+        if (intent.hasExtra(EXTRA_CALLBACK)) {
+            val callbackExtra = intent.getBundleExtra(EXTRA_CALLBACK)
+            val callback = IAppInstallCallback.Stub.asInterface(callbackExtra?.getBinder("callback"))
+            try {
+                callback.callback(resultCode)
+            } catch (_: RemoteException) {
+                // Caller went away; nothing left to do.
+            }
         }
         activity.finish()
+    }
+
+    // -------------------------------------------------- package-installer callback
+
+    /**
+     * Extra carrying the opaque PackageInstaller transaction token. Present on
+     * every PACKAGEINSTALLER_CALLBACK we create; a callback without it, or with
+     * a token that does not match a live transaction, is unsolicited and
+     * dropped without side effects.
+     */
+    const val EXTRA_TX_NONCE = "tx_nonce"
+
+    // Live package-installer transactions: nonce -> bound session id.
+    // -1 means "no session binding" (used by the uninstall path, whose session
+    // id is unknown until the callback arrives). Process-local and random, so a
+    // foreign caller cannot fabricate a token.
+    private val activeInstallTransactions = ConcurrentHashMap<String, Int>()
+
+    /** Begin a PackageInstaller transaction; returns the fresh opaque nonce. */
+    @JvmStatic
+    @Synchronized
+    fun beginInstallTransaction(sessionId: Int): String {
+        val nonce = java.util.UUID.randomUUID().toString()
+        activeInstallTransactions[nonce] = sessionId
+        return nonce
+    }
+
+    /** PACKAGEINSTALLER_CALLBACK entry point (see DummyActivity.onNewIntent). */
+    fun onNewIntent(activity: Activity, intent: Intent) {
+        handlePackageInstallerCallback(activity, intent)
+    }
+
+    /**
+     * Pre-Q install/uninstall result entry point (see DummyActivity.onActivityResult).
+     */
+    fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == DummyActivity.REQUEST_INSTALL_PACKAGE) {
+            appInstallFinished(activity, resultCode)
+        }
+    }
+
+    /**
+     * Handle a PACKAGEINSTALLER_CALLBACK. Trusted only when it carries the
+     * opaque nonce of a live transaction created by this process and, for
+     * installs, the exact bound session id. STATUS_PENDING_USER_ACTION is
+     * non-terminal (the transaction stays live for the final status) and only
+     * launches the type-checked system confirmation intent. Terminal outcomes
+     * are validated and consumed atomically, so the result reaches the original
+     * caller exactly once even on duplicate or concurrent delivery.
+     */
+    private fun handlePackageInstallerCallback(activity: Activity, intent: Intent) {
+        val status = intent.extras?.getInt(PackageInstaller.EXTRA_STATUS, -1)
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            if (!isLiveCallback(intent)) {
+                activity.finish()
+                return
+            }
+            // The system's own confirmation intent, type-checked before launch.
+            val confirmation = intent.extras?.get(Intent.EXTRA_INTENT) as? Intent
+            if (confirmation != null && confirmation.action != null) {
+                confirmation.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(confirmation)
+            } else {
+                // No valid confirmation to show: fail the transaction.
+                consumeCallback(intent)
+                appInstallFinished(activity, Activity.RESULT_CANCELED)
+            }
+            return
+        }
+
+        // Terminal: validate and consume in one atomic step.
+        if (!consumeCallback(intent)) {
+            activity.finish()
+            return
+        }
+        if (status == PackageInstaller.STATUS_SUCCESS) {
+            appInstallFinished(activity, Activity.RESULT_OK)
+        } else {
+            appInstallFinished(activity, Activity.RESULT_CANCELED)
+        }
+    }
+
+    /**
+     * Non-consuming validation for the PENDING_USER_ACTION notification: the
+     * transaction must still be live after this callback because the final
+     * status arrives separately.
+     */
+    private @Synchronized fun isLiveCallback(intent: Intent): Boolean {
+        val nonce = intent.getStringExtra(EXTRA_TX_NONCE) ?: return false
+        val boundSession = activeInstallTransactions[nonce] ?: return false
+        if (boundSession < 0) return true // uninstall path: nonce is the identity
+        val delivered = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        return delivered == boundSession
+    }
+
+    /**
+     * Terminal: atomically validate the callback and remove the transaction, so
+     * a second delivery cannot pass. Returns true only for the first terminal
+     * delivery of a live transaction.
+     */
+    private @Synchronized fun consumeCallback(intent: Intent): Boolean {
+        val nonce = intent.getStringExtra(EXTRA_TX_NONCE) ?: return false
+        val boundSession = activeInstallTransactions.remove(nonce) ?: return false
+        if (boundSession < 0) return true
+        val delivered = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        return delivered == boundSession
     }
 
     // ------------------------------------------------------------------ unfreeze / freeze
@@ -239,25 +417,26 @@ object CrossProfileAction {
         if (!ProfileManager.isProfileOwner(activity)) {
             // Forward to the managed profile along with its launch settings.
             val fwd = Intent(Actions.UNFREEZE_AND_LAUNCH)
-            ProfileManager.transferIntentToProfile(activity, fwd, activity.auth)
             val packageName = intent.getStringExtra("packageName").orEmpty()
-            fwd.putExtra("packageName", packageName)
-            fwd.putExtra(
-                "shouldFreeze",
+            val shouldFreeze =
                 settings.syncAutoFreezeServiceEnabled() &&
-                    settings.syncAutoFreezeContains(packageName),
-            )
-
+                    settings.syncAutoFreezeContains(packageName)
             if (intent.hasExtra("linkedPackages")) {
                 val packages = intent.getStringExtra("linkedPackages")!!.split(",").toTypedArray()
-                val shouldFreeze = BooleanArray(packages.size)
+                val shouldFreezeList = BooleanArray(packages.size)
                 for (i in packages.indices) {
-                    shouldFreeze[i] = settings.syncAutoFreezeServiceEnabled() &&
+                    shouldFreezeList[i] = settings.syncAutoFreezeServiceEnabled() &&
                         settings.syncAutoFreezeContains(packages[i])
                 }
                 fwd.putExtra("linkedPackages", packages)
-                fwd.putExtra("linkedPackagesShouldFreeze", shouldFreeze)
+                fwd.putExtra("linkedPackagesShouldFreeze", shouldFreezeList)
             }
+            fwd.putExtra("packageName", packageName)
+            fwd.putExtra("shouldFreeze", shouldFreeze)
+            // Sign only after every extra is in place: the HMAC payload covers
+            // the canonical extras at signing time, so adding extras after
+            // signing would make the recipient's verification fail.
+            ProfileManager.transferIntentToProfile(activity, fwd, activity.auth)
 
             activity.startActivity(fwd)
             activity.finish()
@@ -302,9 +481,11 @@ object CrossProfileAction {
     fun publicFreezeAll(activity: DummyActivity, settings: SettingsStore) {
         if (!ProfileManager.isProfileOwner(activity)) {
             val intent = Intent(Actions.FREEZE_ALL_IN_LIST)
-            ProfileManager.transferIntentToProfile(activity, intent, activity.auth)
+            // Set extras before signing: the HMAC payload covers them at
+            // signing time (see unfreezeAndLaunch).
             val list = settings.syncAutoFreezeList()
             intent.putExtra("list", list.toTypedArray())
+            ProfileManager.transferIntentToProfile(activity, intent, activity.auth)
             activity.startActivity(intent)
             activity.finish()
         } else {
@@ -355,12 +536,33 @@ object CrossProfileAction {
     }
 
     fun doStartFileShuttle(activity: DummyActivity) {
+        val intent = activity.intent
+        val token = intent.getStringExtra(EXTRA_CALLBACK_TOKEN)
+
+        // The FileShuttleService binder is only handed to a callback whose
+        // request intent was authenticated with the steady-state cross-profile
+        // HMAC. A TOFU bootstrap intent carries only an auth key (no signature
+        // extra), so the presence of the signature extra is the discriminator;
+        // the fresh one-time token additionally binds this delivery to a
+        // specific live request. An arbitrary exported caller can satisfy
+        // neither, so it can never obtain the service binder.
+        if (intent.getByteArrayExtra(AuthManager.EXTRA_SIGNATURE) == null) {
+            activity.finish()
+            return
+        }
+        if (token.isNullOrEmpty() || !activity.consumeFileShuttleToken(token)) {
+            // Missing identity or a duplicate delivery of an already-consumed
+            // token: reject late/unexpected callbacks without side effects.
+            activity.finish()
+            return
+        }
+
         (activity.application as ShelterApp).bindFileShuttleService(
             object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName, service: IBinder) {
                     val shuttle = IFileShuttleService.Stub.asInterface(service)
                     val callback = IFileShuttleServiceCallback.Stub.asInterface(
-                        activity.intent.getBundleExtra("extra")?.getBinder("callback"))
+                        activity.intent.getBundleExtra(EXTRA_EXTRA)?.getBinder("callback"))
                     try {
                         callback.callback(shuttle)
                     } catch (_: RemoteException) {
@@ -456,6 +658,10 @@ object CrossProfileAction {
 
         override fun onFinished(sessionId: Int, success: Boolean) {
             if (sessionId != this.sessionId) return
+            // The transaction is deliberately NOT consumed here: the terminal
+            // outcome is delivered exactly once by the PACKAGEINSTALLER_CALLBACK
+            // status receiver (see handlePackageInstallerCallback), which may
+            // arrive after this dialog finishes.
             dialog.dismiss()
             pi.unregisterSessionCallback(this)
         }

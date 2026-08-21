@@ -40,13 +40,35 @@ object ProfileManager {
      * Resolve [intent] to the Shelter component living in the *other* profile.
      * The caller must populate the intent's action first. Throws
      * [IllegalStateException] when no counterpart profile exists.
+     *
+     * Resolution is fail-closed: EVERY component matching [intent] must be this
+     * app's exact [DummyActivity] class inside this app's package. Any other
+     * handler — an overlay, a clone, or an app abusing the action — makes the
+     * counterpart ambiguous/untrusted and is rejected outright; it is never
+     * silently skipped in favor of the Shelter match, because the counterpart
+     * profile is only trustworthy when nothing else can claim the intent there.
+     * Failure modes:
+     *  - no resolver -> no counterpart profile;
+     *  - any foreign or unexpected component -> reject.
      */
     private fun resolveCounterpart(context: Context, intent: Intent): ComponentName {
         val resolved: List<ResolveInfo> = context.packageManager.queryIntentActivities(intent, 0)
-        val counterpart = resolved.firstOrNull {
-            it.activityInfo.packageName != context.packageName
-        } ?: throw IllegalStateException("Cannot find an intent in other profile")
-        return ComponentName(counterpart.activityInfo.packageName, counterpart.activityInfo.name)
+        if (resolved.isEmpty()) {
+            throw IllegalStateException("Cannot find a Shelter counterpart component")
+        }
+        for (ri in resolved) {
+            if (ri.activityInfo.packageName != context.packageName ||
+                ri.activityInfo.name != DummyActivity::class.java.name
+            ) {
+                throw IllegalStateException(
+                    "Counterpart intent resolves to non-Shelter component " +
+                        "${ri.activityInfo.packageName}/${ri.activityInfo.name}; refusing"
+                )
+            }
+        }
+        // All resolvers are the same Shelter activity; any member describes it.
+        val info = resolved[0]
+        return ComponentName(info.activityInfo.packageName, info.activityInfo.name)
     }
 
     /**

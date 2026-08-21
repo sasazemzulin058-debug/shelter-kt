@@ -1,27 +1,29 @@
 package net.typeblog.shelter.util
 
-import android.os.RemoteException
+import android.app.Notification
+import android.content.Context
+import android.content.Intent
 
-// Canonicalize a document id against DUMMY_ROOT and reject any path that
-// escapes the root or attempts parent traversal. Reassembles the normalized
-// path (dropping empty and "." segments) so the same document id is always
-// mapped to a single canonical form. Throws RemoteException on invalid input
-// so provider callers can map it to a "not found" / false result.
-internal fun String.sanitizeDocumentPath(): String {
-    if (!startsWith(CrossProfileDocumentsProvider.DUMMY_ROOT)) {
-        throw RemoteException("Invalid document path")
-    }
-    val cleaned = ArrayList<String>(16)
-    for (part in split('/')) {
-        when (part) {
-            "", "." -> Unit
-            ".." -> throw RemoteException("Invalid document path: traversal")
-            else -> cleaned.add(part)
-        }
-    }
-    return if (cleaned.isEmpty()) {
-        CrossProfileDocumentsProvider.DUMMY_ROOT
-    } else {
-        CrossProfileDocumentsProvider.DUMMY_ROOT + cleaned.joinToString("/")
-    }
+/**
+ * Focused Kotlin extensions split out of the original monolithic Utility
+ * class. Each extension delegates to the matching [Utility] helper (which
+ * remains the canonical legacy surface) and is consumed by the util/receiver
+ * slice: the documents provider and the device-admin receiver.
+ */
+
+/** True when this app is the owner of the current profile. */
+fun Context.isProfileOwner(): Boolean = Utility.isProfileOwner(this)
+
+/** Route [this] intent to the other profile (and sign it for transfer). */
+fun Intent.transferIntentToProfile(context: Context) {
+    Utility.transferIntentToProfile(context, this)
 }
+
+/** Build a cross-version compatible notification through [Utility]. */
+fun Context.buildNotification(
+    important: Boolean,
+    ticker: String,
+    title: String,
+    desc: String,
+    icon: Int,
+): Notification = Utility.buildNotification(this, important, ticker, title, desc, icon)

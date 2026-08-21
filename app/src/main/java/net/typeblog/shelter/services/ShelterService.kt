@@ -19,8 +19,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.typeblog.shelter.R
-import net.typeblog.shelter.ShelterApp
 import net.typeblog.shelter.profile.Actions
+import net.typeblog.shelter.profile.AuthManager
 import net.typeblog.shelter.profile.DummyActivity
 import net.typeblog.shelter.receivers.DeviceAdminReceiver
 import net.typeblog.shelter.util.ApplicationInfoWrapper
@@ -54,16 +54,19 @@ class ShelterService : Service() {
         }
 
         override fun stopShelterService(kill: Boolean) {
-            // Dirty: give the binder a moment to flush, then unbind and possibly
-            // tear down the whole process.
+            // Dirty: give the binder a moment to flush, then stop the service and
+            // possibly tear down the whole process. Service binding is owned by
+            // DummyActivity/UI, so unbinding happens naturally when their
+            // connection drops; stopSelf() only requests the stop.
             scope.launch {
                 delay(1L)
-                (application as ShelterApp).unbindShelterService()
 
                 if (kill && !(mIsProfileOwner && FreezeService.hasPendingAppToFreeze())) {
                     // Just kill the entire process if this signal is received and
                     // the process has nothing left to do.
                     System.exit(0)
+                } else {
+                    stopSelf()
                 }
             }
         }
@@ -130,7 +133,7 @@ class ShelterService : Service() {
                 callbackExtra.putBinder("callback", callback!!.asBinder())
                 intent.putExtra("callback", callbackExtra)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                DummyActivity.registerSameProcessRequest(intent)
+                AuthManager.registerSameProcess(intent)
                 mStartActivityProxy?.startActivity(intent)
             } else {
                 if (mIsProfileOwner) {
@@ -160,7 +163,7 @@ class ShelterService : Service() {
             intent.putExtra("callback", callbackExtra)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            DummyActivity.registerSameProcessRequest(intent)
+            AuthManager.registerSameProcess(intent)
             mStartActivityProxy?.startActivity(intent)
         }
 
@@ -175,7 +178,7 @@ class ShelterService : Service() {
                 callbackExtra.putBinder("callback", callback!!.asBinder())
                 intent.putExtra("callback", callbackExtra)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                DummyActivity.registerSameProcessRequest(intent)
+                AuthManager.registerSameProcess(intent)
                 mStartActivityProxy?.startActivity(intent)
             } else {
                 if (mIsProfileOwner) {

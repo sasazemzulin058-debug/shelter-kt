@@ -2,7 +2,6 @@ package net.typeblog.shelter.services
 
 import android.app.Service
 import android.content.Intent
-import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.Point
 import android.media.ThumbnailUtils
@@ -22,7 +21,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import net.typeblog.shelter.R
-import net.typeblog.shelter.ShelterApp
 import net.typeblog.shelter.util.CrossProfileDocumentsProvider
 import net.typeblog.shelter.util.Utility
 import java.io.File
@@ -68,7 +66,7 @@ class FileShuttleService : Service() {
             val f = resolvePath(path) ?: return emptyMap()
             val map = HashMap<String, Serializable>()
             map[DocumentsContract.Document.COLUMN_DOCUMENT_ID] = f.absolutePath
-            if (f == Environment.getExternalStorageDirectory()) {
+            if (f == rootFile) {
                 // Show "Shelter" as the name of the root directory.
                 map[DocumentsContract.Document.COLUMN_DISPLAY_NAME] = getString(R.string.app_name)
             } else {
@@ -196,6 +194,12 @@ class FileShuttleService : Service() {
         Log.d("FileShuttleService", "being destroyed")
     }
 
+    // Canonical external-storage root, resolved once; everything the shuttle
+    // serves must live under it.
+    private val rootFile: File? by lazy {
+        runCatching { Environment.getExternalStorageDirectory().canonicalFile }.getOrNull()
+    }
+
     /**
      * Resolve a client-supplied path and confine it to external storage.
      * [CrossProfileDocumentsProvider.DUMMY_ROOT]-prefixed paths map onto the external
@@ -212,9 +216,7 @@ class FileShuttleService : Service() {
         } else {
             path
         }
-        val root = runCatching {
-            Environment.getExternalStorageDirectory().canonicalFile
-        }.getOrNull() ?: return null
+        val root = rootFile ?: return null
         val file = runCatching { File(raw).canonicalFile }.getOrNull() ?: return null
         val rootPath = root.absolutePath
         val filePath = file.absolutePath
@@ -232,7 +234,8 @@ class FileShuttleService : Service() {
 
     private fun suicide() {
         mHandler.removeCallbacks(mSuicideTask)
-        (application as ShelterApp).unbindFileShuttleService()
+        // The binder connection is owned by whoever bound us; stopping ourselves
+        // is enough — the binding side will notice the service going away.
         stopSelf()
     }
 
