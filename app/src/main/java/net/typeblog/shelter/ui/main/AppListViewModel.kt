@@ -191,6 +191,11 @@ class AppListViewModel @Inject constructor(
         packages.forEach { repo.unfreeze(it) }
         null
     }
+    /** Freeze several linked packages (used by multi-select freeze selected). */
+    fun freezeMany(packages: List<String>) = mutate {
+        packages.forEach { repo.freeze(it) }
+        null
+    }
 
     // ------------------------------------------------------------------ helpers
 
