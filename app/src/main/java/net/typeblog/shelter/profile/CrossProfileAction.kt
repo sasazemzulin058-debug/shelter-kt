@@ -198,7 +198,7 @@ object CrossProfileAction {
             callbackIntent.action = Actions.PACKAGEINSTALLER_CALLBACK
             val pending = android.app.PendingIntent.getActivity(
                 activity, 0, callbackIntent, android.app.PendingIntent.FLAG_MUTABLE)
-            pi.uninstall(activity.intent.getStringExtra("package"), pending.intentSender)
+            pi.uninstall(activity.intent.getStringExtra("package").orEmpty(), pending.intentSender)
             return
         }
 
@@ -394,9 +394,9 @@ object CrossProfileAction {
         val intent = activity.intent
         val name = intent.getStringExtra("name")
         if (intent.hasExtra("boolean")) {
-            settings.syncSetBooleanByName(name, intent.getBooleanExtra("boolean", false))
+            settings.syncSetBooleanByName(name.orEmpty(), intent.getBooleanExtra("boolean", false))
         } else if (intent.hasExtra("int")) {
-            settings.syncSetIntByName(name, intent.getIntExtra("int", Int.MIN_VALUE))
+            settings.syncSetIntByName(name.orEmpty(), intent.getIntExtra("int", Int.MIN_VALUE))
         }
 
         // Apply settings-driven component toggling, then refresh policies in the
@@ -444,7 +444,7 @@ object CrossProfileAction {
             // Badging is shown by the installer dialog; nothing to do.
         }
 
-        override fun onActiveChanged(sessionId: Int) {
+        override fun onActiveChanged(sessionId: Int, active: Boolean) {
             // Activation state is tracked via onProgressChanged/onFinished.
         }
 

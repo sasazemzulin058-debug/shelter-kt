@@ -84,16 +84,16 @@ class AppRepository(
     suspend fun installApp(packageName: String): InstallResult {
         val wrapper = wrapper(packageName)
         val target = otherService ?: service
-        return InstallResult.from(awaitInstall { cb -> target.installApp(wrapper, cb) })
+        return from(awaitInstall { cb -> target.installApp(wrapper, cb) })
     }
 
     suspend fun installApk(proxy: UriForwardProxy): InstallResult =
-        InstallResult.from(awaitInstall { cb -> service.installApk(proxy, cb) })
+        from(awaitInstall { cb -> service.installApk(proxy, cb) })
 
     /** Uninstall (or, for system apps, disable) an app in the current profile. */
     suspend fun uninstallApp(packageName: String): InstallResult {
         val wrapper = wrapper(packageName)
-        return InstallResult.from(awaitInstall { cb -> service.uninstallApp(wrapper, cb) })
+        return from(awaitInstall { cb -> service.uninstallApp(wrapper, cb) })
     }
 
     suspend fun freeze(packageName: String) {
