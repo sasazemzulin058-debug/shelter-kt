@@ -9,7 +9,7 @@ import android.content.Intent
 import android.os.Build
 import net.typeblog.shelter.R
 import net.typeblog.shelter.profile.Actions
-import net.typeblog.shelter.ui.DummyActivity
+import net.typeblog.shelter.profile.DummyActivity
 import net.typeblog.shelter.util.Utility
 
 class DeviceAdminReceiver : DeviceAdminReceiver() {

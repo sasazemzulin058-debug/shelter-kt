@@ -243,16 +243,16 @@ class FileShuttleService : Service() {
             return loadBitmapThumbnail(fullPath, sizeHint)
         }
         var result = MediaStore.Images.Thumbnails.queryMiniThumbnail(
-            contentResolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null
+            contentResolver, id.toLong(), MediaStore.Images.Thumbnails.MINI_KIND, null
         )
         if (result.count == 0) {
             // If no thumbnail is found, request one first.
             MediaStore.Images.Thumbnails.getThumbnail(
-                contentResolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null
+                contentResolver, id.toLong(), MediaStore.Images.Thumbnails.MINI_KIND, null
             )
             result.close()
             result = MediaStore.Images.Thumbnails.queryMiniThumbnail(
-                contentResolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null
+                contentResolver, id.toLong(), MediaStore.Images.Thumbnails.MINI_KIND, null
             )
         }
         result.use { cursor ->

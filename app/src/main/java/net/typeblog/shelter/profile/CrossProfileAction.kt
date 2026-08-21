@@ -2,7 +2,6 @@ package net.typeblog.shelter.profile
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.ProgressBar
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
@@ -16,6 +15,7 @@ import android.os.Environment
 import android.os.IBinder
 import android.os.RemoteException
 import android.os.StrictMode
+import android.widget.ProgressBar
 import android.widget.Toast
 import net.typeblog.shelter.R
 import net.typeblog.shelter.ShelterApp
@@ -177,7 +177,7 @@ object CrossProfileAction {
                     if (input == null) continue
                     input.use { ins ->
                         // Do not trust available() as the length; copy until EOF.
-                        val output = session.openWrite(UUID.randomUUID().toString(), 0, ins.available())
+                        val output = session.openWrite(UUID.randomUUID().toString(), 0, ins.available().toLong())
                         output.use { os ->
                             pipe(ins, os)
                             session.fsync(os)
@@ -221,7 +221,7 @@ object CrossProfileAction {
         if (!intent.hasExtra("callback")) return
 
         val callbackExtra = intent.getBundleExtra("callback")
-        val callback = IAppInstallCallback.Stub.asInterface(callbackExtra.getBinder("callback"))
+        val callback = IAppInstallCallback.Stub.asInterface(callbackExtra?.getBinder("callback"))
         try {
             callback.callback(resultCode)
         } catch (_: RemoteException) {
@@ -240,7 +240,7 @@ object CrossProfileAction {
             // Forward to the managed profile along with its launch settings.
             val fwd = Intent(Actions.UNFREEZE_AND_LAUNCH)
             ProfileManager.transferIntentToProfile(activity, fwd, activity.auth)
-            val packageName = intent.getStringExtra("packageName")
+            val packageName = intent.getStringExtra("packageName").orEmpty()
             fwd.putExtra("packageName", packageName)
             fwd.putExtra(
                 "shouldFreeze",
@@ -275,7 +275,7 @@ object CrossProfileAction {
             }
         }
 
-        val packageName = intent.getStringExtra("packageName")
+        val packageName = intent.getStringExtra("packageName").orEmpty()
         policy.setApplicationHidden(admin, packageName, false)
 
         val launchIntent = activity.packageManager.getLaunchIntentForPackage(packageName)
@@ -360,7 +360,7 @@ object CrossProfileAction {
                 override fun onServiceConnected(name: ComponentName, service: IBinder) {
                     val shuttle = IFileShuttleService.Stub.asInterface(service)
                     val callback = IFileShuttleServiceCallback.Stub.asInterface(
-                        activity.intent.getBundleExtra("extra").getBinder("callback"))
+                        activity.intent.getBundleExtra("extra")?.getBinder("callback"))
                     try {
                         callback.callback(shuttle)
                     } catch (_: RemoteException) {
@@ -434,6 +434,18 @@ object CrossProfileAction {
 
         init {
             dialog.show()
+        }
+
+        override fun onCreated(sessionId: Int) {
+            // Session creation is requested synchronously; nothing to do.
+        }
+
+        override fun onBadgingChanged(sessionId: Int) {
+            // Badging is shown by the installer dialog; nothing to do.
+        }
+
+        override fun onActiveChanged(sessionId: Int) {
+            // Activation state is tracked via onProgressChanged/onFinished.
         }
 
         override fun onProgressChanged(sessionId: Int, progress: Float) {

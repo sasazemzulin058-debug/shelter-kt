@@ -92,7 +92,7 @@ class FreezeService : Service() {
     }
 
     // Cancels the freeze job if the designated delay has not yet passed.
-    private val mUnlockReceiver = object : BroadcastReceiver() {
+    private val mUnlockReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             mAlarmManager!!.cancel(mFreezeWork)
         }
@@ -105,7 +105,7 @@ class FreezeService : Service() {
 
     private var mAlarmManager: AlarmManager? = null
 
-    private val mFreezeWork = object : AlarmManager.OnAlarmListener {
+    private val mFreezeWork: AlarmManager.OnAlarmListener = object : AlarmManager.OnAlarmListener {
         override fun onAlarm() {
             synchronized(FreezeService::class.java) {
                 // Cancel the unlock receiver first - the delay has passed if this

@@ -13,6 +13,9 @@ local.properties
 *.keystore
 .env
 
+
+# Local visual/dashboard tooling
+.superpowers/
 # OS
 .DS_Store
 Thumbs.db

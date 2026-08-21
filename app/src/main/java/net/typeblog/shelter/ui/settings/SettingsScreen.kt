@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.typeblog.shelter.R
-import net.typeblog.shelter.ui.settings.SettingsViewModel.PermissionRequest
 private data class AutoFreezeDelayOption(val seconds: Int, val labelRes: Int)
 
 // 0 / 60 / 120 / 300 seconds. The supplied label resources (Immediately / 1

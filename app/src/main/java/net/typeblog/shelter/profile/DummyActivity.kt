@@ -22,7 +22,7 @@ import net.typeblog.shelter.data.settings.SettingsStore
  */
 class DummyActivity : Activity() {
 
-    private lateinit var auth: AuthManager
+    internal lateinit var auth: AuthManager
     private lateinit var settings: SettingsStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,10 +65,10 @@ class DummyActivity : Activity() {
         super.onNewIntent(intent)
 
         if (intent.action == Actions.PACKAGEINSTALLER_CALLBACK) {
-            val status = intent.extras.getInt(PackageInstaller.EXTRA_STATUS)
+            val status = intent.extras?.getInt(PackageInstaller.EXTRA_STATUS)
             when (status) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION ->
-                    startActivity(intent.extras.get(Intent.EXTRA_INTENT) as Intent)
+                    startActivity(intent.extras?.get(Intent.EXTRA_INTENT) as Intent)
                 PackageInstaller.STATUS_SUCCESS ->
                     CrossProfileAction.appInstallFinished(this, Activity.RESULT_OK)
                 else ->

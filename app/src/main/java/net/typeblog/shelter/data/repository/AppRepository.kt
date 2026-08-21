@@ -213,7 +213,7 @@ class AppRepository(
     private companion object {
         const val RESULT_CANNOT_INSTALL_SYSTEM_APP = 100001
 
-        fun InstallResult.from(code: Int): InstallResult = when (code) {
+        fun from(code: Int): InstallResult = when (code) {
             Activity.RESULT_OK -> InstallResult.Ok
             RESULT_CANNOT_INSTALL_SYSTEM_APP -> InstallResult.CannotInstallSystemApp
             else -> InstallResult.Other(code)
