@@ -1,5 +1,6 @@
 package net.typeblog.shelter.profile
 
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.security.keystore.KeyGenParameterSpec
@@ -7,7 +8,6 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
 import java.security.MessageDigest
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
@@ -21,10 +21,16 @@ import kotlin.math.abs
  * Android Keystore (each profile has its own Keystore, so a Keystore key is
  * never visible on the other side). Instead:
  *
- * 1. A random 256-bit secret is bootstrapped across the boundary: the side
- *    that has no key yet generates one and sends it verbatim via the
- *    `auth_key` extra (TOFU — the FIRST received key is trusted, later ones
- *    ignored).
+ * 1. The 256-bit secret is bootstrapped by the SETUP WIZARD, not by any
+ *    intent: SetupActivity generates one random secret, installs it in the
+ *    parent profile, and places the identical bytes in the platform
+ *    provisioning admin extras bundle
+ *    ([DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE]). The
+ *    provisioning framework delivers that bundle to the trusted admin entry
+ *    points in the managed profile — FinalizeActivity on O+,
+ *    DeviceAdminReceiver before O — which install it via
+ *    [installProvisionedSecret]. No `auth_key` intent extra is ever accepted:
+ *    an exported intent cannot seed a shared secret (fail closed).
  * 2. At rest, that secret is encrypted with a profile-local Android Keystore
  *    AES-GCM wrapping key, so its bytes are only recoverable inside this
  *    profile while remaining tamper-resistant on disk.
@@ -32,6 +38,12 @@ import kotlin.math.abs
  *    protocol version, action, timestamp, nonce and the remaining extras.
  *    Expired, replayed, malformed or unsigned-but-not-whitelisted intents are
  *    rejected.
+ *
+ * FINALIZE_PROVISION mutates provisioning state, so it is NOT a public action.
+ * It is accepted only through a process-local one-shot random token registered
+ * by the trusted provisioning entry points (FinalizeActivity / the pre-O
+ * DeviceAdminReceiver), or — the pre-O parent hop — signed with the shared
+ * secret. An arbitrary exported intent carries neither and fails closed.
  *
  * A one-shot same-process bypass exists for the three original same-process
  * actions (INSTALL_PACKAGE, UNINSTALL_PACKAGE, UNFREEZE_AND_LAUNCH). It is a
@@ -47,48 +59,38 @@ class AuthManager(context: Context) {
     private var cachedSecret: ByteArray? = null
     private val seenNonces = LinkedHashMap<String, Boolean>()
 
-    // Provisioning-authorization gate: whether this profile has entered an
-    // explicit setup/provisioning state and may therefore accept a TOFU
-    // bootstrap key or a FINALIZE_PROVISION. Set only from provisioning
-    // entry points (BIND_DEVICE_ADMIN-protected or the setup wizard).
-    private var cachedBootstrapAuth: Boolean? = null
-    private val seenBootstrapNonces = LinkedHashSet<String>()
-
     companion object {
         private const val PREFS_NAME = "shelter_auth"
         private const val PREF_AUTH_KEY = "auth_key"
-        private const val PREF_BOOTSTRAP_AUTH = "bootstrap_authorized"
 
         // Android Keystore wrapping key (profile-local, never crosses the boundary).
         private const val WRAP_ALIAS = "shelter_auth_wrap_key"
 
         private const val PROTOCOL_VERSION = 1
         private const val SIGNATURE_WINDOW_MS = 30_000L // 30 seconds validity
-        private const val BOOTSTRAP_WINDOW_MS = 60_000L  // 60s to complete a bootstrap exchange
         private const val NONCE_CACHE_CAP = 1024
 
-// Intent extras for the signed path. SIGNATURE/NONCE/AUTH_KEY are public so
+// Intent extras for the signed path. SIGNATURE/NONCE are public so
         // receiver-side gates (e.g. FileShuttle binder handoff) can require
-        // steady-state HMAC presence and reject TOFU-seeded intents without
-        // duplicating string literals.
-        const val EXTRA_AUTH_KEY = "auth_key"
+        // steady-state HMAC presence without duplicating string literals.
         const val EXTRA_VERSION = "auth_version"
         const val EXTRA_TIMESTAMP = "timestamp"
         const val EXTRA_NONCE = "auth_nonce"
         const val EXTRA_SIGNATURE = "signature"
-        private const val EXTRA_BOOTSTRAP_NONCE = "bootstrap_nonce"
 
-        // Explicit marker an intent must carry to be allowed to trigger a TOFU
-        // bootstrap exchange or finalization. Set by signIntent() bootstrap
-        // emission and by the finalize senders (FinalizeActivity /
-        // DeviceAdminReceiver); combined with the persisted provisioning gate.
-        const val EXTRA_BOOTSTRAP_ALLOWED = "bootstrap_allowed"
+        // Key inside the platform provisioning admin extras bundle that carries
+        // the 32-byte shared secret from SetupActivity to the managed profile.
+        const val EXTRA_PROVISIONED_SECRET = "shelter_provisioned_secret"
 
-        // Extras excluded from the canonical payload and from delivering a fresh key.
+        // Process-local one-shot FINALIZE_PROVISION token (set by
+        // registerFinalizeProvision, consumed by verifyFinalizeProvision).
+        private const val EXTRA_FINALIZE_TOKEN = "finalize_token"
+
+        // Extras excluded from the canonical payload.
         private val RESERVED_EXTRAS = setOf(
-            EXTRA_AUTH_KEY, EXTRA_VERSION, EXTRA_TIMESTAMP,
-            EXTRA_NONCE, EXTRA_SIGNATURE, EXTRA_BOOTSTRAP_NONCE,
-            EXTRA_BOOTSTRAP_ALLOWED,
+            EXTRA_VERSION, EXTRA_TIMESTAMP,
+            EXTRA_NONCE, EXTRA_SIGNATURE,
+            EXTRA_PROVISIONED_SECRET, EXTRA_FINALIZE_TOKEN,
         )
 
         // Extras carrying the one-shot same-process token grant; excluded from
@@ -111,57 +113,17 @@ class AuthManager(context: Context) {
         private const val SAME_PROCESS_GRANT_CAP = 16
         private val sameProcessGrants = LinkedHashMap<String, SameProcessGrant>()
 
-        // Actions that may be authenticated via a bootstrap exchange. Everything
-        // requiring a shared secret is eligible except the public-entry actions
-        // and the PackageInstaller callback (which uses its own session nonce).
-        private val BOOTSTRAP_ACTIONS: Set<String> by lazy {
-            val allSigned = Actions.SAME_PROCESS_ACTIONS +
-                listOf(
-                    Actions.START_SERVICE,
-                    Actions.TRY_START_SERVICE,
-                    Actions.START_FILE_SHUTTLE,
-                    Actions.START_FILE_SHUTTLE_2,
-                    Actions.UNFREEZE_AND_LAUNCH,
-                    Actions.PUBLIC_FREEZE_ALL,
-                    Actions.PUBLIC_UNFREEZE_AND_LAUNCH,
-                    Actions.FREEZE_ALL_IN_LIST,
-                    Actions.SYNCHRONIZE_PREFERENCE,
-                )
-            allSigned - Actions.UNSIGNED_ACTIONS
-        }
-
-        private val random = SecureRandom()
-
-        /**
-         * Canonical primitive action+extras fingerprint (sorted key=value), with
-         * the marker extras and the HMAC/bootstrap extras excluded so that
-         * registration-time and check-time digests agree.
-         */
-        private fun sameProcessDigest(intent: Intent): String {
-            val sb = StringBuilder(intent.action ?: "")
-            val extras = intent.extras
-            if (extras != null) {
-                val parts = ArrayList<String>()
-                for (key in extras.keySet()) {
-                    if (key in SAME_PROCESS_EXCLUDED_EXTRAS) continue
-                    val v = extras.get(key) ?: continue
-                    when (v) {
-                        is String -> parts += "$key=$v"
-                        is Int -> parts += "$key=$v"
-                        is Long -> parts += "$key=$v"
-                        is Boolean -> parts += "$key=$v"
-                        is Float -> parts += "$key=$v"
-                        is Double -> parts += "$key=$v"
-                        is Array<*> -> parts += "$key=${v.joinToString(",")}"
-                    }
-                }
-                parts.sort()
-                sb.append('&').append(parts.joinToString("&"))
-            }
-            val md = MessageDigest.getInstance("SHA-256")
-            return md.digest(sb.toString().toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
-        }
+        // One-shot FINALIZE_PROVISION grants (process-local). Registered only
+        // by the trusted provisioning entry points — FinalizeActivity (O+) and
+        // the pre-O DeviceAdminReceiver — immediately before they start
+        // DummyActivity, and consumed atomically by its verification gate. A
+        // long window is harmless: the token is a fresh 128-bit random value
+        // that cannot be guessed, and registration happens only in
+        // BIND_DEVICE_ADMIN-protected code, so a 60-minute validity simply
+        // tolerates the pre-O notification-tap delay.
+        private const val FINALIZE_WINDOW_MS = 60 * 60_000L
+        private const val FINALIZE_GRANT_CAP = 16
+        private val finalizeGrants = LinkedHashMap<String, Long>()
 
         /**
          * Register that [intent] will be delivered to the counterpart same-process
@@ -211,6 +173,84 @@ class AuthManager(context: Context) {
             if (grant.action != action) return false
             if (grant.digest != sameProcessDigest(intent)) return false
             return true
+        }
+
+        /**
+         * Register a process-local one-shot grant for a FINALIZE_PROVISION
+         * intent that will be delivered to DummyActivity in THIS process. The
+         * callers are exclusively the trusted provisioning entry points
+         * (FinalizeActivity on O+, DeviceAdminReceiver before O), which are
+         * protected by BIND_DEVICE_ADMIN and invoked solely by the provisioning
+         * framework; the grant is stamped onto [intent] and consumed atomically
+         * by [verifyFinalizeProvision]. An arbitrary exported intent cannot
+         * fabricate the token.
+         */
+        @Synchronized
+        fun registerFinalizeProvision(intent: Intent): String {
+            if (finalizeGrants.size >= FINALIZE_GRANT_CAP) finalizeGrants.clear()
+            finalizeGrants.entries.removeAll { it.value <= System.currentTimeMillis() }
+            val token = java.util.UUID.randomUUID().toString()
+            finalizeGrants[token] = System.currentTimeMillis() + FINALIZE_WINDOW_MS
+            intent.putExtra(EXTRA_FINALIZE_TOKEN, token)
+            return token
+        }
+
+        /**
+         * Atomically verify and consume a FINALIZE_PROVISION grant carried by
+         * [intent]. Consumes on any attempt (one-shot, fail closed — no retry).
+         */
+        @Synchronized
+        fun verifyFinalizeProvision(intent: Intent): Boolean {
+            if (intent.action != Actions.FINALIZE_PROVISION) return false
+            val token = intent.getStringExtra(EXTRA_FINALIZE_TOKEN) ?: return false
+            val expiresAt = finalizeGrants.remove(token) ?: return false // consume
+            return System.currentTimeMillis() <= expiresAt
+        }
+
+        /**
+         * Read the 32-byte shared secret out of the platform provisioning admin
+         * extras bundle of [intent] (SetupActivity placed it there before
+         * launching [DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE]).
+         * Returns null when the platform did not deliver the bundle or the
+         * secret is missing/malformed — the caller must fail closed.
+         */
+        fun provisionedSecret(intent: Intent?): ByteArray? {
+            val bundle = intent
+                ?.getBundleExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE)
+                ?: return null
+            val secret = bundle.getByteArray(EXTRA_PROVISIONED_SECRET) ?: return null
+            return if (secret.size == 32) secret else null
+        }
+
+        /**
+         * Canonical primitive action+extras fingerprint (sorted key=value), with
+         * the marker extras and the HMAC/bootstrap extras excluded so that
+         * registration-time and check-time digests agree.
+         */
+        private fun sameProcessDigest(intent: Intent): String {
+            val sb = StringBuilder(intent.action ?: "")
+            val extras = intent.extras
+            if (extras != null) {
+                val parts = ArrayList<String>()
+                for (key in extras.keySet()) {
+                    if (key in SAME_PROCESS_EXCLUDED_EXTRAS) continue
+                    val v = extras.get(key) ?: continue
+                    when (v) {
+                        is String -> parts += "$key=$v"
+                        is Int -> parts += "$key=$v"
+                        is Long -> parts += "$key=$v"
+                        is Boolean -> parts += "$key=$v"
+                        is Float -> parts += "$key=$v"
+                        is Double -> parts += "$key=$v"
+                        is Array<*> -> parts += "$key=${v.joinToString(",")}"
+                    }
+                }
+                parts.sort()
+                sb.append('&').append(parts.joinToString("&"))
+            }
+            val md = MessageDigest.getInstance("SHA-256")
+            return md.digest(sb.toString().toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
         }
     }
 
@@ -267,7 +307,8 @@ class AuthManager(context: Context) {
         return try {
             unwrapSecret(encoded).also { cachedSecret = it }
         } catch (_: Exception) {
-            // Corrupt/unwrap-able stored blob: force a fresh bootstrap.
+            // Corrupt/unwrap-able stored blob: force the provisioning flow to
+            // re-bootstrap; never authenticate with it.
             null
         }
     }
@@ -316,6 +357,24 @@ class AuthManager(context: Context) {
     // ------------------------------------------------------------------ public API
 
     /**
+     * Install the shared 256-bit secret delivered by the platform provisioning
+     * flow (see [provisionedSecret]). Requires exactly 32 bytes; anything else
+     * is rejected, so a malformed platform delivery fails closed instead of
+     * silently bootstrapping a broken session. Installing the secret closes the
+     * setup window: from here on the profile authenticates via steady-state
+     * HMAC only.
+     */
+    fun installProvisionedSecret(secret: ByteArray) {
+        require(secret.size == 32) {
+            "provisioned secret must be exactly 32 bytes, got ${secret.size}"
+        }
+        storeSecret(secret)
+    }
+
+    /** Whether this profile already holds the shared secret (steady state). */
+    fun hasSharedSecret(): Boolean = sharedSecret() != null
+
+    /**
      * Register that [intent] will be delivered to the counterpart same-process
      * activity without a signature. Arms a process-local one-shot random token
      * bound to the exact action and a digest of the intent's primitive extras,
@@ -328,95 +387,53 @@ class AuthManager(context: Context) {
         Companion.registerSameProcess(intent)
 
     /**
-     * Mark this profile as being in an explicit provisioning/bootstrap state,
-     * authorizing a single TOFU key exchange and FINALIZE_PROVISION acceptance.
-     * Called only from provisioning entry points (the setup wizard and the
-     * BIND_DEVICE_ADMIN-protected finalize receiver/activity).
+     * Register a process-local one-shot FINALIZE_PROVISION grant on an intent
+     * about to be delivered to DummyActivity in this process. See the companion
+     * [Companion.registerFinalizeProvision].
      */
-    fun markBootstrapAuthorized() {
-        prefs.edit().putBoolean(PREF_BOOTSTRAP_AUTH, true).apply()
-        cachedBootstrapAuth = true
-        seenBootstrapNonces.clear()
-    }
-
-    /** Whether this profile has entered (and not yet reset) provisioning state. */
-    fun isBootstrapAuthorized(): Boolean {
-        cachedBootstrapAuth?.let { return it }
-        return prefs.getBoolean(PREF_BOOTSTRAP_AUTH, false).also { cachedBootstrapAuth = it }
-    }
+    fun registerFinalizeProvision(intent: Intent): String =
+        Companion.registerFinalizeProvision(intent)
 
     /**
-     * Close the provisioning/bootstrap gate for good. Called once a shared
-     * secret provably exists in this profile — a TOFU key accepted from the
-     * counterpart or a steady-state HMAC verified — so the TOFU and
-     * FINALIZE_PROVISION acceptance windows do not stay open indefinitely
-     * after setup. A past provisioning state must never keep accepting
-     * key/finalize injection from a later same-profile attacker.
-     */
-    private fun disarmBootstrapAuth() {
-        cachedBootstrapAuth = false
-        prefs.edit().remove(PREF_BOOTSTRAP_AUTH).apply()
-        seenBootstrapNonces.clear()
-    }
-
-    /**
-     * Sign an intent for cross-profile transfer. If we have no shared secret
-     * yet, bootstrap one — but ONLY while provisioning is authorized, and only
-     * for an action that actually requires a shared secret. Otherwise the
-     * intent stays unsigned and is rejected by the receiver (fail closed).
+     * Sign an intent for cross-profile transfer. Requires the shared secret —
+     * there is NO bootstrap emission: a secret can only be installed through
+     * [installProvisionedSecret] (the platform provisioning admin extras), so
+     * an intent sent without a secret stays unsigned and is rejected by the
+     * receiver (fail closed).
      */
     fun signIntent(intent: Intent): Intent = intent.apply {
-        val secret = sharedSecret()
-        if (secret == null) {
-            val action = intent.action
-            if (isBootstrapAuthorized() && action != null && action in BOOTSTRAP_ACTIONS) {
-                val fresh = ByteArray(32).also { random.nextBytes(it) }
-                putExtra(EXTRA_AUTH_KEY, Base64.encodeToString(fresh, Base64.NO_WRAP))
-                putExtra(EXTRA_VERSION, PROTOCOL_VERSION)
-                putExtra(EXTRA_BOOTSTRAP_NONCE, java.util.UUID.randomUUID().toString())
-                putExtra(EXTRA_BOOTSTRAP_ALLOWED, true)
-                putExtra(EXTRA_TIMESTAMP, System.currentTimeMillis())
-                storeSecret(fresh)
-            }
-            // Not authorized (or not a bootstrapable action): fail closed by
-            // leaving the intent unsigned; the receiver will reject it.
-        } else {
-            val action = intent.action
-            if (action != null) {
-                val version = PROTOCOL_VERSION
-                val ts = System.currentTimeMillis()
-                val nonce = java.util.UUID.randomUUID().toString()
-                putExtra(EXTRA_VERSION, version)
-                putExtra(EXTRA_TIMESTAMP, ts)
-                putExtra(EXTRA_NONCE, nonce)
-                putExtra(EXTRA_SIGNATURE,
-                    hmac(secret, buildPayload(version, action, ts, nonce, canonicalExtras(intent))))
-            }
-        }
+        val secret = sharedSecret() ?: return@apply // fail closed, leave unsigned
+        val action = intent.action ?: return@apply
+        val version = PROTOCOL_VERSION
+        val ts = System.currentTimeMillis()
+        val nonce = java.util.UUID.randomUUID().toString()
+        putExtra(EXTRA_VERSION, version)
+        putExtra(EXTRA_TIMESTAMP, ts)
+        putExtra(EXTRA_NONCE, nonce)
+        putExtra(EXTRA_SIGNATURE,
+            hmac(secret, buildPayload(version, action, ts, nonce, canonicalExtras(intent))))
     }
 
     /**
      * Verify an intent received across the profile boundary.
      * Returns true for whitelisted unsigned actions, the one-shot same-process
-     * bypass (for its three actions), a fresh TOFU bootstrap key, or a valid
-     * signed intent.
+     * bypass (for its three actions), a consumed FINALIZE_PROVISION token or
+     * pre-O signed FINALIZE delivery, or a valid signed intent.
      */
     fun verifyIntent(intent: Intent): Boolean {
         val action = intent.action ?: return false
 
-        // FINALIZE_PROVISION mutates provisioning state. It is NOT allowed to
-        // ride the generic unsigned path: it requires BOTH the explicit
-        // bootstrap_allowed marker (bootstrap emission sets it via signIntent;
-        // the finalize senders must set it explicitly) AND an armed persisted
-        // provisioning state. That state is armed only by provisioning entry
-        // points — the BIND_DEVICE_ADMIN-protected FinalizeActivity and
-        // DeviceAdminReceiver (invoked solely by the provisioning framework)
-        // and the non-exported SetupActivity — so an arbitrary app can neither
-        // arm it nor forge a finalize. The marker is disarmed as soon as a
-        // shared secret provably exists (see [disarmBootstrapAuth]).
-        if (action == Actions.FINALIZE_PROVISION) {
-            return isBootstrapAuthorized() &&
-                intent.getBooleanExtra(EXTRA_BOOTSTRAP_ALLOWED, false)
+        // FINALIZE_PROVISION mutates provisioning state. It is NOT a public
+        // action. It is accepted only when (a) the process-local one-shot token
+        // registered by the trusted provisioning entry points (FinalizeActivity
+        // on O+, DeviceAdminReceiver before O — both BIND_DEVICE_ADMIN-protected
+        // and invoked solely by the provisioning framework) matches and is
+        // consumed, or (b) — the pre-O parent hop — it arrives signed with the
+        // shared secret, which proves a same-app delivery from the provisioned
+        // profile. An arbitrary exported intent carries neither a token nor a
+        // valid signature and fails closed.
+        if (action == Actions.FINALIZE_PROVISION && verifyFinalizeProvision(intent)) {
+            return true
         }
 
         // Whitelisted public actions need no signature.
@@ -425,45 +442,12 @@ class AuthManager(context: Context) {
         // One-shot same-process token bypass (original three actions only).
         if (verifySameProcess(intent)) return true
 
-        val secret = sharedSecret()
-        if (secret == null) {
-            // TOFU bootstrap: accept the FIRST delivered key only when (a) this
-            // profile is in an explicit provisioning state, (b) the action is one
-            // that genuinely requires a shared secret, and (c) the exchange carries
-            // a fresh nonce within the bootstrap window. This blocks arbitrary
-            // exported intents from seeding a hostile shared secret.
-            if (!isBootstrapAuthorized()) return false
-            if (action !in BOOTSTRAP_ACTIONS) return false
-            // The sender must have explicitly declared this a bootstrap
-            // exchange; a generic unsigned intent must fail closed.
-            if (!intent.getBooleanExtra(EXTRA_BOOTSTRAP_ALLOWED, false)) return false
+        // Steady state: the shared secret must already be installed. There is
+        // deliberately NO TOFU path — no `auth_key` extra is ever accepted —
+        // so a profile without a secret rejects everything (fail closed).
+        val secret = sharedSecret() ?: return false
 
-            val delivered = intent.getStringExtra(EXTRA_AUTH_KEY) ?: return false
-            if (intent.getIntExtra(EXTRA_VERSION, 0) != PROTOCOL_VERSION) return false
-
-            val nonce = intent.getStringExtra(EXTRA_BOOTSTRAP_NONCE) ?: return false
-            if (nonce.isEmpty() || !seenBootstrapNonces.add(nonce)) return false
-
-            val ts = intent.getLongExtra(EXTRA_TIMESTAMP, 0L)
-            val now = System.currentTimeMillis()
-            if (ts <= 0L) return false
-            if (now - ts > BOOTSTRAP_WINDOW_MS) return false       // expired
-            if (abs(now - ts) > BOOTSTRAP_WINDOW_MS) return false  // future skew
-
-            val decoded = runCatching {
-                Base64.decode(delivered, Base64.NO_WRAP)
-            }.getOrNull() ?: return false
-            if (decoded.size != 32) return false
-            storeSecret(decoded)
-            // A key exchange completed: the provisioning/bootstrap window is
-            // over. Accepting the counterpart's key once is enough — future
-            // intents ride the HMAC path, and a past setup state must not keep
-            // accepting later key/finalize injection.
-            disarmBootstrapAuth()
-            return true
-        }
-
-        // Steady state: reject malformed, expired, replayed or forged intents.
+        // Reject malformed, expired, replayed or forged intents.
         val version = intent.getIntExtra(EXTRA_VERSION, Int.MIN_VALUE)
         if (version != PROTOCOL_VERSION) return false
 
@@ -487,9 +471,6 @@ class AuthManager(context: Context) {
         if (!MessageDigest.isEqual(signature, expected)) return false
 
         seenNonces[nonceKey] = true
-        // A valid signed exchange provably crosses the boundary; the shared
-        // secret is in place, so the provisioning/bootstrap gate is over.
-        disarmBootstrapAuth()
         return true
     }
 
@@ -507,9 +488,8 @@ class AuthManager(context: Context) {
     fun reset() {
         cachedSecret = null
         seenNonces.clear()
-        seenBootstrapNonces.clear()
-        cachedBootstrapAuth = null
         sameProcessGrants.clear()
-        prefs.edit().remove(PREF_AUTH_KEY).remove(PREF_BOOTSTRAP_AUTH).apply()
+        finalizeGrants.clear()
+        prefs.edit().remove(PREF_AUTH_KEY).apply()
     }
 }

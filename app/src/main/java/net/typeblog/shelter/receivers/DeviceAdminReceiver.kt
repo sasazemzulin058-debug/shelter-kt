@@ -29,15 +29,22 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
         // event here.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return
 
+        // Fail closed: the shared secret must arrive through the platform
+        // provisioning admin extras bundle placed by SetupActivity. Without it
+        // there is nothing to finalize against — no secret, no finalization.
+        val secret = AuthManager.provisionedSecret(intent) ?: return
+        AuthManager(context).installProvisionedSecret(secret)
+
         // Complex logic in a BroadcastReceiver is not reliable:
         // delegate finalization to the DummyActivity.
         val i = Intent(context.applicationContext, DummyActivity::class.java)
         i.action = Actions.FINALIZE_PROVISION
         i.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        // Provisioning bootstrap window: authorize this finalization intent
-        // and carry the marker the DummyActivity init gate requires.
-        AuthManager(context).markBootstrapAuthorized()
-        i.putExtra(AuthManager.EXTRA_BOOTSTRAP_ALLOWED, true)
+        // Process-local one-shot token: only this BIND_DEVICE_ADMIN-protected
+        // receiver (invoked solely by the provisioning framework) can register
+        // it; DummyActivity consumes it in the same process. An arbitrary
+        // exported intent cannot forge it.
+        AuthManager(context).registerFinalizeProvision(i)
 
         // Delegate starting the activity to a notification to work around
         // background limitations, and to fix bugs on custom OSes like MIUI/EMUI.

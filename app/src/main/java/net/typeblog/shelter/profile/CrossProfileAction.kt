@@ -88,12 +88,13 @@ object CrossProfileAction {
     fun finalizeProvision(activity: DummyActivity, settings: SettingsStore) {
         if (ProfileManager.isProfileOwner(activity)) {
             // This branch only runs after the DummyActivity authentication gate
-            // accepted FINALIZE_PROVISION, which requires the explicit
-            // provisioning-authorization marker set only by the BIND_DEVICE_ADMIN
-            // protected finalize entry points (FinalizeActivity / the pre-O
-            // provisioning receiver). Belt and braces: refuse to forward anything
-            // that did not enter provisioning state through the platform signal.
-            if (!activity.auth.isBootstrapAuthorized()) {
+            // accepted FINALIZE_PROVISION — either through the process-local
+            // one-shot token registered by the BIND_DEVICE_ADMIN-protected
+            // finalize entry points (FinalizeActivity / the pre-O provisioning
+            // receiver) or a signed delivery. Belt and braces: refuse to forward
+            // anything while this profile does not yet hold the shared secret,
+            // i.e. finalization was not set up through the platform extras.
+            if (!activity.auth.hasSharedSecret()) {
                 activity.finish()
                 return
             }
@@ -101,31 +102,23 @@ object CrossProfileAction {
             // policies are applied; on O+ FinalizeActivity drives activity-based flow.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 val intent = Intent(Actions.FINALIZE_PROVISION)
-                // Unsigned: the parent side accepts this public action without a
-                // signature — but AuthManager.verifyIntent additionally requires the
-                // explicit bootstrap marker on FINALIZE intents. It must be stamped
-                // here; the parent side's own armed provisioning state (set by
-                // SetupActivity) is what proves this finalize belongs to a real
-                // setup session.
-                intent.putExtra(AuthManager.EXTRA_BOOTSTRAP_ALLOWED, true)
-                ProfileManager.transferIntentToProfileUnsigned(activity, intent)
+                // Sign with the shared secret installed from the admin extras:
+                // the parent side (which holds the same secret) accepts this as
+                // a provable same-secret delivery — no forgeable marker, no TOFU.
+                ProfileManager.transferIntentToProfile(activity, intent, activity.auth)
                 activity.startActivity(intent)
             }
             activity.finish()
         } else {
-            // Parent profile. Mutate the durable setup state ONLY while an explicit
-            // setup session is recorded:
-            //  - the parent's own SetupActivity persisted the bootstrap-authorization
-            //    marker before launching system provisioning (with IS_SETTING_UP as
-            //    the pre-O pending-finalize marker), and
-            //  - finalization has not already been applied.
-            // This makes duplicate or spoofed FINALIZE_PROVISION deliveries idempotent
-            // no-ops instead of state-flipping side effects.
+            // Parent profile. Mutate the durable setup state ONLY when this
+            // delivery provably shares our secret (the parent generated it and
+            // placed it in the platform admin extras at provisioning launch, so
+            // a valid signature proves the finalize comes from the profile it
+            // provisioned) AND finalization has not already been applied.
+            // This makes duplicate or spoofed FINALIZE_PROVISION deliveries
+            // idempotent no-ops instead of state-flipping side effects.
             val alreadyFinalized = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
-            val inSetupSession =
-                settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP) ||
-                    activity.auth.isBootstrapAuthorized()
-            if (!alreadyFinalized && inSetupSession) {
+            if (!alreadyFinalized && activity.auth.hasSharedSecret()) {
                 settings.syncSetBoolean(SettingsStore.Keys.HAS_SETUP, true)
                 settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, false)
                 val intent = Intent(Actions.ACTION_PROFILE_PROVISIONED)

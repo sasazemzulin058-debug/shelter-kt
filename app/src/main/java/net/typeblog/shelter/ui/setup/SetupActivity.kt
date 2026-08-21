@@ -20,6 +20,7 @@ import net.typeblog.shelter.profile.AuthManager
 import net.typeblog.shelter.profile.ProfileManager
 import net.typeblog.shelter.receivers.DeviceAdminReceiver
 import net.typeblog.shelter.ui.MainActivity
+import java.security.SecureRandom
 import javax.inject.Inject
 
 /**
@@ -113,11 +114,8 @@ class SetupActivity : ComponentActivity() {
             return
         }
         // The user may have aborted provisioning before without clearing data,
-        // leaving stale auth keys that would make us believe we can authenticate.
+        // leaving stale auth secrets that would make us believe we can authenticate.
         authManager.reset()
-        // Enter the explicit provisioning state so the counterpart may bootstrap
-        // a shared secret against this profile.
-        authManager.markBootstrapAuthorized()
         try {
             provisionProfile.launch(Unit)
         } catch (_: ActivityNotFoundException) {
@@ -137,19 +135,31 @@ class SetupActivity : ComponentActivity() {
             settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
             step = Step.ACTION_REQUIRED
         } else {
-            // Provisioning failed/cancelled: revoke the bootstrap authorization
-            // so a stale gate cannot be abused later. A retry re-authorizes.
+            // Provisioning failed/cancelled: revoke the installed secret so a
+            // stale secret cannot be used later. A retry re-generates one.
             authManager.reset()
             step = Step.FAILED
         }
     }
 
-    private class ProfileProvisionContract : ActivityResultContract<Unit, Boolean>() {
+    private inner class ProfileProvisionContract : ActivityResultContract<Unit, Boolean>() {
         override fun createIntent(context: Context, input: Unit): Intent {
             val admin = ComponentName(context.applicationContext, DeviceAdminReceiver::class.java)
+            // Generate ONE shared 256-bit secret and install it in this (parent)
+            // profile NOW. The identical bytes ride the platform provisioning
+            // admin extras bundle into the managed profile, where the trusted
+            // admin entry points install them via AuthManager.installProvisionedSecret.
+            // No `auth_key` intent extra is ever involved, so no exported intent
+            // can seed the shared secret.
+            val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
+            authManager.installProvisionedSecret(secret)
+            val adminExtras = Bundle().apply {
+                putByteArray(AuthManager.EXTRA_PROVISIONED_SECRET, secret)
+            }
             return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_SKIP_ENCRYPTION, true)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME, admin)
+                .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, adminExtras)
         }
 
         override fun parseResult(resultCode: Int, intent: Intent?): Boolean =

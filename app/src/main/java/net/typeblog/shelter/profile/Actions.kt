@@ -28,7 +28,6 @@ object Actions {
 
     /** Actions that don't require signature verification (public entry points). */
     val UNSIGNED_ACTIONS = setOf(
-        FINALIZE_PROVISION,
         PUBLIC_FREEZE_ALL,
         PUBLIC_UNFREEZE_AND_LAUNCH,
     )

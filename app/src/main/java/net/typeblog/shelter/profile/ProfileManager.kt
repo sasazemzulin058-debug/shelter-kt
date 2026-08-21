@@ -5,6 +5,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.os.Build
@@ -37,49 +39,116 @@ object ProfileManager {
         ComponentName(context.applicationContext, DeviceAdminReceiver::class.java)
 
     /**
-     * Resolve [intent] to the Shelter component living in the *other* profile.
-     * The caller must populate the intent's action first. Throws
-     * [IllegalStateException] when no counterpart profile exists.
+     * Resolve [intent] to the platform component that delivers it into the
+     * *other* profile. The caller must populate the intent's action first.
+     * Throws [IllegalStateException] when no counterpart profile exists or
+     * when the resolution cannot be trusted.
      *
-     * Resolution is fail-closed: EVERY component matching [intent] must be this
-     * app's exact [DummyActivity] class inside this app's package. Any other
-     * handler — an overlay, a clone, or an app abusing the action — makes the
-     * counterpart ambiguous/untrusted and is rejected outright; it is never
-     * silently skipped in favor of the Shelter match, because the counterpart
-     * profile is only trustworthy when nothing else can claim the intent there.
+     * Cross-profile delivery is realized by the platform's cross-profile
+     * intent forwarder. When this app's profile owner registered a matching
+     * cross-profile intent filter ([enforceWorkProfilePolicies]), activity
+     * resolution in the *source* profile returns the local shell component
+     * plus the platform forwarder entry
+     * ([ResolveInfo.isCrossProfileIntentForwarderActivity]); only starting
+     * that forwarder preserves the target-user identity. Pinning the intent to
+     * this package's own [DummyActivity] would keep the delivery in the
+     * current user and bypass cross-user routing, so that component is never
+     * selected here.
+     *
+     * Selection is deterministic and fail-closed:
+     *  - the platform forwarder entry (confirmed by
+     *    [ResolveInfo.isCrossProfileIntentForwarderActivity] and a
+     *    system-application check) is the ONLY foreign component accepted, and
+     *    is preferred whenever present;
+     *  - this package's exact [DummyActivity] is an accepted context match but
+     *    is never chosen as the routing target;
+     *  - any other handler — a third-party app declaring the action, a clone,
+     *    an overlay — makes the resolution ambiguous/untrusted and the whole
+     *    transfer is rejected. It is never skipped in favor of the forwarder:
+     *    an attacker who can interpose on the cross-profile path would
+     *    otherwise receive signed payloads and the bootstrap key.
+     *
+     * Device prerequisite: AOSP/SAF-style managed-profile devices where a
+     * cross-profile intent filter registered by this app's profile owner
+     * surfaces the platform forwarder in
+     * [android.content.pm.PackageManager.queryIntentActivities]. On devices
+     * whose platform does not surface that forwarder entry for the action, the
+     * transfer fails closed with [IllegalStateException] instead of guessing a
+     * component; callers then report "no work profile available" and trigger a
+     * re-setup, which re-registers the filters.
+     *
      * Failure modes:
-     *  - no resolver -> no counterpart profile;
-     *  - any foreign or unexpected component -> reject.
+     *  - no resolvers -> no counterpart profile or filters not yet registered;
+     *  - only the local [DummyActivity] matches -> counterpart unreachable
+     *    (no profile or filters cleared); equivalent to the original app's
+     *    "Cannot find an intent in other profile";
+     *  - a non-system handler matches -> ambiguous/untrusted, refused.
      */
     private fun resolveCounterpart(context: Context, intent: Intent): ComponentName {
         val resolved: List<ResolveInfo> = context.packageManager.queryIntentActivities(intent, 0)
         if (resolved.isEmpty()) {
             throw IllegalStateException("Cannot find a Shelter counterpart component")
         }
+        val ownPackage = context.packageName
+        val dummyClass = DummyActivity::class.java.name
+        var localDummy = false
+        var forwarder: ComponentName? = null
         for (ri in resolved) {
-            if (ri.activityInfo.packageName != context.packageName ||
-                ri.activityInfo.name != DummyActivity::class.java.name
-            ) {
-                throw IllegalStateException(
-                    "Counterpart intent resolves to non-Shelter component " +
-                        "${ri.activityInfo.packageName}/${ri.activityInfo.name}; refusing"
-                )
+            val ai = ri.activityInfo ?: throw IllegalStateException(
+                "Counterpart intent resolves to a component without activity info; refusing")
+            if (ai.packageName == ownPackage && ai.name == dummyClass) {
+                localDummy = true
+                continue
             }
+            if (ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)) {
+                val candidate = ComponentName(ai.packageName, ai.name)
+                if (forwarder != null && forwarder != candidate) {
+                    throw IllegalStateException(
+                        "Multiple platform cross-profile forwarders resolve " +
+                            "${intent.action}; refusing ambiguous routing"
+                    )
+                }
+                forwarder = candidate
+                continue
+            }
+            throw IllegalStateException(
+                "Counterpart intent resolves to unverified component " +
+                    "${ai.packageName}/${ai.name}; refusing ambiguous routing"
+            )
         }
-        // All resolvers are the same Shelter activity; any member describes it.
-        val info = resolved[0]
-        return ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+        // The platform forwarder is the only component that preserves the
+        // target-user identity; prefer it over the local context match.
+        if (forwarder != null) {
+            return forwarder
+        }
+        // Only our own activity matched: the counterpart profile is absent or
+        // its cross-profile filters were cleared.
+        if (localDummy) {
+            throw IllegalStateException("Cannot find a Shelter counterpart component")
+        }
+        throw IllegalStateException("Cannot find a Shelter counterpart component")
     }
 
+    /** True when [ai] belongs to a system application (the platform itself). */
+    @Suppress("DEPRECATION") // FLAG_SYSTEM is the only system-app signal below API 29.
+    private fun isSystemApplication(ai: ActivityInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ai.applicationInfo.isSystemApp()
+        } else {
+            (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+        }
+
     /**
-     * Repoint [intent] at the counterpart profile's Shelter activity without
-     * signing it. Used for probing and for intents that require no signature.
+     * Repoint [intent] at the platform component that routes it into the
+     * counterpart profile, without signing it. Used for probing and for
+     * intents that require no signature.
      */
     fun transferIntentToProfileUnsigned(context: Context, intent: Intent) {
         intent.component = resolveCounterpart(context, intent)
     }
 
-    /** Repoint [intent] at the counterpart profile and sign it with [auth]. */
+    /** Repoint [intent] at the counterpart profile (via the platform
+     *  cross-profile forwarder) and sign it with [auth]. */
     fun transferIntentToProfile(context: Context, intent: Intent, auth: AuthManager) {
         transferIntentToProfileUnsigned(context, intent)
         auth.signIntent(intent)
