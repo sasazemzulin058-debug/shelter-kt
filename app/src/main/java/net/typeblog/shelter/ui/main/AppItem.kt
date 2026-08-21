@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import net.typeblog.shelter.R
 import net.typeblog.shelter.data.model.AppInfo
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AppItem(
     app: AppInfo,

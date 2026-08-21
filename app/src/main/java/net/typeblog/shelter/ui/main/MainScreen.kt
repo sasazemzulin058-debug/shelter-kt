@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -222,7 +224,7 @@ fun MainScreen(
                                     net.typeblog.shelter.util.Utility.createLauncherShortcut(
                                         context,
                                         launchIntent,
-                                        android.graphics.drawable.Icon.createWithResource(context, R.mipmap.ic_freeze),
+                                        android.graphics.drawable.Icon.createWithResource(context, R.mipmap.ic_launcher_egg),
                                         "shelter-freeze-all",
                                         context.getString(R.string.freeze_all_shortcut),
                                     )
