@@ -20,6 +20,7 @@ import android.os.Environment
 import java.io.FileDescriptor
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import net.typeblog.shelter.R
 import net.typeblog.shelter.profile.AuthManager
 import net.typeblog.shelter.profile.ProfileManager
@@ -220,6 +221,7 @@ object Utility {
             .build()
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun buildNotificationOreo(
         context: Context,
         important: Boolean,
