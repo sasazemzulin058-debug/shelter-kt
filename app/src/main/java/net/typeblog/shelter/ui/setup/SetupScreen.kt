@@ -1,5 +1,6 @@
 package net.typeblog.shelter.ui.setup
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -45,6 +46,10 @@ enum class Step {
         Step.PERMISSIONS -> Step.WELCOME
         Step.COMPATIBILITY -> Step.PERMISSIONS
         Step.READY -> Step.COMPATIBILITY
+        // The provisioning launcher result is lost after process recreation, so
+        // the spinner would otherwise be a dead end. Back returns to READY so the
+        // user can re-start provisioning (or bail out of the wizard entirely).
+        Step.PROVISIONING -> Step.READY
         else -> this
     }
 
@@ -63,8 +68,10 @@ enum class Step {
         get() = when (this) {
             Step.WELCOME, Step.PERMISSIONS, Step.COMPATIBILITY -> ButtonAction.NEXT
             Step.READY -> ButtonAction.START
-            Step.FAILED -> ButtonAction.DISMISS
-            Step.PROVISIONING, Step.ACTION_REQUIRED -> null
+            // PROVISIONING and FAILED both offer a retry: re-launch provisioning
+            // after a dead spinner (lost launcher result) or a failed attempt.
+            Step.PROVISIONING, Step.FAILED -> ButtonAction.RETRY
+            Step.ACTION_REQUIRED -> ButtonAction.DISMISS
         }
 
     companion object {
@@ -73,7 +80,7 @@ enum class Step {
 }
 
 enum class ButtonAction {
-    NEXT, START, DISMISS
+    NEXT, START, RETRY, DISMISS
 }
 
 private data class StepContent(
@@ -103,8 +110,14 @@ fun SetupScreen(
     step: Step,
     onBack: () -> Unit,
     onNext: () -> Unit,
+    onRetry: () -> Unit,
     onFinish: () -> Unit,
 ) {
+    // Rebinding the top-bar arrow also wires the system/hardware back button to
+    // the same navigation so gesture back follows the wizard instead of the
+    // default (which would finish the activity mid-wizard).
+    BackHandler(enabled = step.hasBack()) { onBack() }
+
     Scaffold(
         modifier = Modifier.fillMaxSize().safeDrawingPadding(),
         topBar = {
@@ -161,6 +174,10 @@ fun SetupScreen(
                 ButtonAction.START -> Button(
                     onClick = onNext, modifier = Modifier.widthIn(min = 200.dp)) {
                     Text(stringResource(R.string.setup_button_start))
+                }
+                ButtonAction.RETRY -> Button(
+                    onClick = onRetry, modifier = Modifier.widthIn(min = 200.dp)) {
+                    Text(stringResource(R.string.setup_button_retry))
                 }
                 ButtonAction.DISMISS -> Button(
                     onClick = onFinish, modifier = Modifier.widthIn(min = 200.dp)) {

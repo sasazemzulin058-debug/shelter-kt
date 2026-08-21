@@ -1,6 +1,7 @@
 package net.typeblog.shelter.ui.settings
 
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,18 +35,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import net.typeblog.shelter.BuildConfig
 import net.typeblog.shelter.R
 private data class AutoFreezeDelayOption(val seconds: Int, val labelRes: Int)
 
-// 0 / 60 / 120 / 300 seconds. The supplied label resources (Immediately / 1
-// minute / 5 minutes / 10 minutes) are paired in value order; the 120s and 300s
-// labels are a pre-existing resource mismatch. ponytail: rename
-// delay_5min/delay_10min or add delay_2min if label accuracy matters.
+// 0 / 60 / 120 / 300 seconds: Immediately / 1 / 2 / 5 minutes.
 private val AUTO_FREEZE_DELAY_OPTIONS = listOf(
     AutoFreezeDelayOption(0, R.string.delay_immediate),
     AutoFreezeDelayOption(60, R.string.delay_1min),
-    AutoFreezeDelayOption(120, R.string.delay_5min),
-    AutoFreezeDelayOption(300, R.string.delay_10min),
+    AutoFreezeDelayOption(120, R.string.delay_2min),
+    AutoFreezeDelayOption(300, R.string.delay_5min),
 )
 
 /**
@@ -74,7 +73,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 8.dp),
         ) {
             item {
-                SectionHeader("Interaction")
+                SectionHeader(stringResource(R.string.settings_interaction))
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_cross_profile_file_chooser),
                     checked = uiState.crossProfileFileChooser,
@@ -94,7 +93,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             }
             item { HorizontalDivider() }
             item {
-                SectionHeader("Services")
+                SectionHeader(stringResource(R.string.settings_services))
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_auto_freeze_service),
                     checked = uiState.autoFreezeService,
@@ -109,6 +108,30 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     title = stringResource(R.string.settings_dont_freeze_foreground),
                     checked = uiState.skipForeground,
                     onCheckedChange = viewModel::setSkipForeground,
+                )
+            }
+            item { HorizontalDivider() }
+            item {
+                SectionHeader(stringResource(R.string.settings_about))
+                SettingsInfoRow(
+                    title = stringResource(R.string.settings_version),
+                    value = BuildConfig.VERSION_NAME,
+                )
+                SettingsLinkRow(
+                    title = stringResource(R.string.settings_source_code),
+                    url = stringResource(R.string.settings_source_code_url),
+                )
+                SettingsLinkRow(
+                    title = stringResource(R.string.settings_translate),
+                    url = stringResource(R.string.settings_translate_url),
+                )
+                SettingsLinkRow(
+                    title = stringResource(R.string.settings_bug_report),
+                    url = stringResource(R.string.settings_bug_report_url),
+                )
+                SettingsLinkRow(
+                    title = stringResource(R.string.settings_patreon),
+                    url = stringResource(R.string.settings_patreon_url),
                 )
             }
         }
@@ -169,6 +192,55 @@ private fun SettingsSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,
+        )
+    }
+}
+
+@Composable
+private fun SettingsInfoRow(title: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SettingsLinkRow(title: String, url: String) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "›",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import net.typeblog.shelter.R
 import net.typeblog.shelter.data.settings.SettingsStore
 import net.typeblog.shelter.profile.Actions
 import net.typeblog.shelter.profile.AuthManager
@@ -125,17 +126,14 @@ class SettingsViewModel @Inject constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!checkFileAccess()) {
                 emitPermission(
-                    "Shelter needs access to All Files for File Shuttle. Please enable the permission for both the "
-                        + "(Personal / Work) Shelter apps shown in the dialog after you press OK.",
+                    context.getString(R.string.settings_permission_file_access),
                     Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
                 )
                 return
             }
             if (!checkSystemAlert()) {
                 emitPermission(
-                    "Shelter needs to Draw over Other Apps for File Shuttle to function. Please enable the permission "
-                        + "for both the (Personal / Work) Shelter apps shown in the dialog. It is used to start File "
-                        + "Shuttle services in the background.",
+                    context.getString(R.string.settings_permission_system_alert),
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 )
                 return
@@ -167,8 +165,7 @@ class SettingsViewModel @Inject constructor(
         }
         if (!checkUsageStats()) {
             emitPermission(
-                "Shelter needs the Usage Stats permission to do this. Please enable it for both Shelter apps shown in "
-                    + "the dialog after you press OK, otherwise this feature will not work properly.",
+                context.getString(R.string.settings_permission_usage_stats),
                 Settings.ACTION_USAGE_ACCESS_SETTINGS,
             )
             return
@@ -211,8 +208,8 @@ class SettingsViewModel @Inject constructor(
 
     // Permission checks require confirmation on BOTH profiles; the work side is
     // confirmed through the work ShelterService, the local side via Utility.
-    // A missing or crashed work binder falls back to the local-only check so
-    // the toggle stays usable before MainActivity completes its binding.
+    // If the work binder is missing or crashed the check fails closed rather
+    // than granting on the local check alone.
 
     private fun checkUsageStats(): Boolean =
         Utility.checkUsageStatsPermission(context) && workCheck { it.hasUsageStatsPermission() }
@@ -224,7 +221,7 @@ class SettingsViewModel @Inject constructor(
         Utility.checkAllFileAccessPermission() && workCheck { it.hasAllFileAccessPermission() }
 
     private inline fun workCheck(check: (IShelterService) -> Boolean): Boolean {
-        val service = workServiceFlow.value ?: return true
+        val service = workServiceFlow.value ?: return false
         return try {
             check(service)
         } catch (_: RemoteException) {

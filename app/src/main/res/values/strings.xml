@@ -38,6 +38,7 @@
     <string name="setup_button_next">Next</string>
     <string name="setup_button_start">Create Work Profile</string>
     <string name="setup_button_finish">Finish</string>
+    <string name="setup_button_retry">Retry</string>
 
     <!-- Notifications -->
     <string name="notifications_important">Shelter Important</string>
@@ -123,8 +124,13 @@
     <string name="format_minutes">%d min</string>
     <string name="delay_immediate">Immediately</string>
     <string name="delay_1min">1 minute</string>
+    <string name="delay_2min">2 minutes</string>
     <string name="delay_5min">5 minutes</string>
-    <string name="delay_10min">10 minutes</string>
+
+    <!-- Settings permission dialogs (plain text, rendered in Compose) -->
+    <string name="settings_permission_usage_stats">Shelter needs the Usage Stats permission to do this. Please enable it for both Shelter apps shown in the dialog after you press OK.</string>
+    <string name="settings_permission_file_access">Shelter needs access to All Files for File Shuttle. Please enable the permission for both Shelter apps shown in the dialog after you press OK.</string>
+    <string name="settings_permission_system_alert">Shelter needs to Draw over Other Apps for File Shuttle to function correctly. Please enable the permission for both Shelter apps shown in the dialog after you press OK.</string>
 
     <!-- General -->
     <string name="loading">Loading…</string>

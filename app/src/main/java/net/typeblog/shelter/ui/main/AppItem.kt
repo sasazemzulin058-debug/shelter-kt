@@ -2,8 +2,8 @@ package net.typeblog.shelter.ui.main
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,17 +20,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import net.typeblog.shelter.R
 import net.typeblog.shelter.data.model.AppInfo
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppItem(
     app: AppInfo,
     icon: Bitmap?,
     isSelected: Boolean,
-    selectionOrder: Int? = null,
+    selectionOrder: Int?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -56,25 +57,27 @@ fun AppItem(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            if (icon != null) {
-                Image(
-                    bitmap = icon.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                )
-            } else {
-                Image(
-                    imageVector = Icons.Default.Android,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                )
+            Box(contentAlignment = Alignment.Center) {
+                if (icon != null) {
+                    Image(
+                        bitmap = icon.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                    )
+                } else {
+                    Image(
+                        imageVector = Icons.Default.Android,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (app.isHidden) "[${app.label}]" else app.label,
+                    text = app.label,
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -90,7 +93,7 @@ fun AppItem(
 
             if (app.isHidden) {
                 Text(
-                    text = "Frozen",
+                    text = stringResource(R.string.frozen_indicator),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 8.dp),
@@ -99,7 +102,7 @@ fun AppItem(
 
             if (app.isInAutoFreezeList) {
                 Text(
-                    text = "Auto",
+                    text = stringResource(R.string.auto_freeze_indicator),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.padding(start = 8.dp),
@@ -109,9 +112,9 @@ fun AppItem(
             selectionOrder?.let { order ->
                 Text(
                     text = order.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(start = 8.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp),
                 )
             }
         }

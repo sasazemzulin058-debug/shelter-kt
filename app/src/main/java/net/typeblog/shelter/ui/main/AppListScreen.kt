@@ -227,20 +227,26 @@ fun AppListScreen(
                     }
                     AppAction.UNINSTALL -> vm.uninstall(app.packageName)
                     AppAction.FREEZE -> {
-                        vm.freeze(app.packageName)
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.freeze_success, app.label),
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        vm.freeze(app.packageName) { success ->
+                            if (success) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.freeze_success, app.label),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
                     }
                     AppAction.UNFREEZE -> {
-                        vm.unfreeze(app.packageName)
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.unfreeze_success, app.label),
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        vm.unfreeze(app.packageName) { success ->
+                            if (success) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.unfreeze_success, app.label),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
                     }
                     AppAction.LAUNCH -> launchApp(context, app.packageName)
                     AppAction.UNFREEZE_AND_LAUNCH -> launchApp(context, app.packageName)

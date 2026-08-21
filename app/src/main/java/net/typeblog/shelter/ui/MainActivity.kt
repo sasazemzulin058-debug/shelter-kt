@@ -1,10 +1,9 @@
 package net.typeblog.shelter.ui
 
-import android.app.Activity
-import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
@@ -13,16 +12,16 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.ActivityResult
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dagger.hilt.android.AndroidEntryPoint
 import net.typeblog.shelter.R
 import net.typeblog.shelter.ShelterApp
 import net.typeblog.shelter.data.settings.SettingsStore
 import net.typeblog.shelter.profile.Actions
+import net.typeblog.shelter.profile.AuthManager
 import net.typeblog.shelter.profile.DummyActivity
 import net.typeblog.shelter.profile.ProfileManager
 import net.typeblog.shelter.services.IAppInstallCallback
@@ -37,131 +36,42 @@ import net.typeblog.shelter.util.Utility
 import javax.inject.Inject
 
 /**
- * Main launcher activity.
+ * Root activity for Shelter.
  *
- * Port of the original Java MainActivity to Compose. It owns the cross-profile
- * service binding lifecycle (main + work), the try-start / start-service
- * handshake, the [IStartActivityProxy] registration, [KillerService] startup,
- * and the ready/error/setup routing. The Compose UI is shown only after both
- * service binders are alive.
+ * Owns the lifecycle-bound service connections (no binders in ViewModels), drives
+ * the main/work service startup chain, registers start-activity proxies, starts
+ * [KillerService], and reacts to service death by restarting itself. The Compose UI
+ * in [MainScreen] receives the service handles and dispatches all user actions.
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject
+    lateinit var auth: AuthManager
+
+    @Inject
     lateinit var settings: SettingsStore
 
-    private val serviceMain = mutableStateOf<IShelterService?>(null)
-    private val serviceWork = mutableStateOf<IShelterService?>(null)
-    private val isReady = mutableStateOf(false)
+    private var serviceMain: IShelterService? by mutableStateOf(null)
+    private var serviceWork: IShelterService? by mutableStateOf(null)
 
+    // Avoid double-killing services while the activity is restarting itself.
     private var restarting = false
 
-    private val startSetup: ActivityResultLauncher<Unit> =
-        registerForActivityResult(SetupContract()) { setupWizardCb(it) }
-
-    private val resumeSetup: ActivityResultLauncher<Unit> =
-        registerForActivityResult(ResumeSetupContract()) { setupWizardCb(it) }
-
-    private val selectApk: ActivityResultLauncher<Array<String>> =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { onApkSelected(it) }
-
-    private val tryStartWorkService: ActivityResultLauncher<Intent> =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            tryStartWorkServiceCb(it)
-        }
-
-    private val bindWorkService: ActivityResultLauncher<Intent> =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            bindWorkServiceCb(it)
-        }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
-        super.onCreate(savedInstanceState)
-
-        setContent {
-            ShelterTheme {
-                if (isReady.value) {
-                    MainScreen(
-                        serviceMain = serviceMain.value,
-                        serviceWork = serviceWork.value,
-                        onInstallApk = { selectApk.launch(arrayOf("application/vnd.android.package-archive")) },
-                    )
-                } else {
-                    // Empty surface while binding; the original showed nothing
-                    // until the view pager was built.
-                }
-            }
-        }
-
-        if (ProfileManager.isProfileOwner(this)) {
-            // The work-profile copy of the app must not host the main UI.
-            finish()
-            return
-        }
-
-        init()
-    }
-
-    private fun init() {
-        if (settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP) &&
-            !ProfileManager.isWorkProfileAvailable(this, settings)
-        ) {
-            resumeSetup.launch(Unit)
-        } else if (!settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)) {
-            startSetup.launch(Unit)
-        } else {
-            applySettings()
-            bindServices()
-        }
-    }
-
-    private fun setupWizardCb(result: Boolean) {
-        if (result) {
+    private val setupLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
             init()
         } else {
             finish()
         }
     }
 
-    private fun applySettings() {
-        ProfileManager.applyProfileSettings(this, settings)
-    }
-
-    private fun bindServices() {
-        (application as ShelterApp).bindShelterService(object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                serviceMain.value = IShelterService.Stub.asInterface(binder)
-                tryStartWorkService()
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-                // Handled by the periodic ping / onResume restart path.
-            }
-        }, false)
-    }
-
-    private fun tryStartWorkService() {
-        val intent = Intent(Actions.TRY_START_SERVICE).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
-        }
-
-        try {
-            Utility.transferIntentToProfile(this, intent)
-        } catch (_: IllegalStateException) {
-            // No work profile at all (not just disabled).
-            settings.syncSetBoolean(SettingsStore.Keys.HAS_SETUP, false)
-            Toast.makeText(this, R.string.work_profile_not_found, Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        tryStartWorkService.launch(intent)
-    }
-
-    private fun tryStartWorkServiceCb(result: ActivityResult) {
-        if (result.resultCode == Activity.RESULT_OK) {
+    private val tryStartWorkLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
             bindWorkService()
         } else {
             Toast.makeText(this, R.string.work_mode_disabled, Toast.LENGTH_LONG).show()
@@ -169,54 +79,149 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val bindWorkLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val binder = result.data?.getBundleExtra("extra")?.getBinder("service")
+            serviceWork = IShelterService.Stub.asInterface(binder)
+            onServicesReady()
+        }
+    }
+
+    private val apkPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) installApk(uri)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+
+        if (ProfileManager.isProfileOwner(this)) {
+            // The main activity should never be shown inside the work profile.
+            finish()
+            return
+        }
+
+        setContent {
+            ShelterTheme {
+                MainScreen(
+                    serviceMain = serviceMain,
+                    serviceWork = serviceWork,
+                    onInstallApk = {
+                        apkPicker.launch(arrayOf("application/vnd.android.package-archive"))
+                    },
+                )
+            }
+        }
+
+        init()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (Actions.ACTION_PROFILE_PROVISIONED == intent.action) {
+            init()
+        }
+    }
+
+    private fun init() {
+        val isSettingUp = settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)
+        val hasSetup = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
+
+        if (isSettingUp && !ProfileManager.isWorkProfileAvailable(this, settings)) {
+            val intent = Intent(this, SetupActivity::class.java)
+                .setAction(Actions.ACTION_RESUME_SETUP)
+            setupLauncher.launch(intent)
+        } else if (!hasSetup) {
+            setupLauncher.launch(Intent(this, SetupActivity::class.java))
+        } else {
+            ProfileManager.applyProfileSettings(this, settings)
+            bindServices()
+        }
+    }
+
+    private fun bindServices() {
+        (application as ShelterApp).bindShelterService(
+            object : ServiceConnection {
+                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                    serviceMain = IShelterService.Stub.asInterface(service)
+                    tryStartWorkService()
+                }
+
+                override fun onServiceDisconnected(name: ComponentName?) {
+                    serviceMain = null
+                }
+            },
+            foreground = false,
+        )
+    }
+
+    private fun tryStartWorkService() {
+        val intent = Intent(Actions.TRY_START_SERVICE).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        }
+        try {
+            ProfileManager.transferIntentToProfile(this, intent, auth)
+        } catch (e: IllegalStateException) {
+            // No work profile at all (distinct from work mode being disabled).
+            settings.syncSetBoolean(SettingsStore.Keys.HAS_SETUP, false)
+            Toast.makeText(this, R.string.work_profile_not_found, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        tryStartWorkLauncher.launch(intent)
+    }
+
     private fun bindWorkService() {
         val intent = Intent(Actions.START_SERVICE).apply {
             addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         }
-        Utility.transferIntentToProfile(this, intent)
-        bindWorkService.launch(intent)
+        ProfileManager.transferIntentToProfile(this, intent, auth)
+        bindWorkLauncher.launch(intent)
     }
 
-    private fun bindWorkServiceCb(result: ActivityResult) {
-        val data = result.data
-        if (result.resultCode != Activity.RESULT_OK || data == null) {
-            Toast.makeText(this, R.string.work_mode_disabled, Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        val extra = data.getBundleExtra("extra")
-        val binder = extra?.getBinder("service")
-        if (binder == null) {
-            Toast.makeText(this, R.string.work_mode_disabled, Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        serviceWork.value = IShelterService.Stub.asInterface(binder)
+    private fun onServicesReady() {
         registerStartActivityProxies()
         startKiller()
-        isReady.value = true
+        // Compose recomposes with the new service handles; MainScreen binds them to
+        // its ViewModels and refreshes the lists.
+    }
+
+    private fun startKiller() {
+        val main = serviceMain ?: return
+        val work = serviceWork ?: return
+        val intent = Intent(this, KillerService::class.java).apply {
+            putExtra(
+                "extra",
+                Bundle().apply {
+                    putBinder("main", main.asBinder())
+                    putBinder("work", work.asBinder())
+                },
+            )
+        }
+        startService(intent)
     }
 
     private fun registerStartActivityProxies() {
+        val main = serviceMain ?: return
+        val work = serviceWork ?: return
         try {
-            serviceMain.value?.setStartActivityProxy(object : IStartActivityProxy.Stub() {
-                override fun startActivity(intent: Intent?) {
-                    intent ?: return
-                    startActivity(intent)
+            main.setStartActivityProxy(object : IStartActivityProxy.Stub() {
+                override fun startActivity(intent: Intent) {
+                    this@MainActivity.startActivity(intent)
                 }
             })
-
-            serviceWork.value?.setStartActivityProxy(object : IStartActivityProxy.Stub() {
-                override fun startActivity(intent: Intent?) {
-                    intent ?: return
-                    // Resolve the DummyActivity component in the main profile,
-                    // then keep the rest of the intent (action/extras) intact.
-                    val dummyIntent = Intent(intent.action)
-                    Utility.transferIntentToProfileUnsigned(this@MainActivity, dummyIntent)
-                    intent.component = dummyIntent.component
-                    startActivity(intent)
+            work.setStartActivityProxy(object : IStartActivityProxy.Stub() {
+                override fun startActivity(intent: Intent) {
+                    // Resolve the counterpart DummyActivity without extras so the package
+                    // manager can find it across the profile boundary.
+                    val dummy = Intent(intent.action)
+                    ProfileManager.transferIntentToProfileUnsigned(this@MainActivity, dummy)
+                    intent.component = dummy.component
+                    this@MainActivity.startActivity(intent)
                 }
             })
         } catch (e: RemoteException) {
@@ -224,34 +229,54 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startKiller() {
-        val main = serviceMain.value?.asBinder() ?: return
-        val work = serviceWork.value?.asBinder() ?: return
-        val bundle = Bundle().apply {
-            putBinder("main", main)
-            putBinder("work", work)
-        }
-        startService(Intent(this, KillerService::class.java).putExtra("extra", bundle))
-    }
-
     private fun servicesAlive(): Boolean {
         return try {
-            serviceMain.value?.ping()
-            serviceWork.value?.ping()
+            serviceMain?.ping()
+            serviceWork?.ping()
             true
         } catch (_: Exception) {
             false
         }
     }
 
+    private fun installApk(uri: Uri) {
+        val work = serviceWork ?: return
+        val proxy = UriForwardProxy(applicationContext, uri)
+        try {
+            work.installApk(
+                proxy,
+                object : IAppInstallCallback.Stub() {
+                    override fun callback(result: Int) {
+                        runOnUiThread {
+                            if (result == RESULT_OK) {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    R.string.install_app_to_profile_success,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    R.string.setup_failed,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    }
+                },
+            )
+        } catch (e: RemoteException) {
+            Toast.makeText(this, R.string.service_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        if (serviceMain.value != null && serviceWork.value != null && !servicesAlive()) {
-            // Kill the old services before recreating so the new activity does
-            // not inherit stale binders.
+        if (serviceMain != null && serviceWork != null && !servicesAlive()) {
+            // Services died (e.g. KillerService was destroyed). Kill stale binders and
+            // restart so the new activity can bind fresh services.
             doOnDestroy()
             restarting = true
-            val intent = intent
             finish()
             startActivity(intent)
         }
@@ -266,55 +291,17 @@ class MainActivity : ComponentActivity() {
 
     private fun doOnDestroy() {
         stopService(Intent(this, KillerService::class.java))
-        Utility.killShelterServices(serviceMain.value, serviceWork.value)
+        Utility.killShelterServices(serviceMain, serviceWork)
+        serviceMain = null
+        serviceWork = null
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_BACKGROUND && serviceMain.value != null) {
-            // Do not keep the activity in the background; the foreground
-            // service in the work profile should die with the UI.
+        if (level >= TRIM_MEMORY_BACKGROUND && serviceMain != null) {
+            // Finishing in the background ensures the work-profile foreground service
+            // is torn down along with this activity.
             finish()
         }
-    }
-
-    private fun onApkSelected(uri: Uri?) {
-        if (uri == null) return
-        val service = serviceWork.value ?: return
-        val proxy = UriForwardProxy(applicationContext, uri)
-
-        try {
-            service.installApk(proxy, object : IAppInstallCallback.Stub() {
-                override fun callback(result: Int) {
-                    runOnUiThread {
-                        if (result == Activity.RESULT_OK) {
-                            Toast.makeText(
-                                this@MainActivity,
-                                R.string.install_app_to_profile_success,
-                                Toast.LENGTH_LONG,
-                            ).show()
-                        }
-                    }
-                }
-            })
-        } catch (_: RemoteException) {
-            // Nothing useful to tell the user from here.
-        }
-    }
-
-    private class SetupContract : ActivityResultContract<Unit, Boolean>() {
-        override fun createIntent(context: android.content.Context, input: Unit): Intent =
-            Intent(context, SetupActivity::class.java)
-
-        override fun parseResult(resultCode: Int, intent: Intent?): Boolean =
-            resultCode == Activity.RESULT_OK
-    }
-
-    private class ResumeSetupContract : ActivityResultContract<Unit, Boolean>() {
-        override fun createIntent(context: android.content.Context, input: Unit): Intent =
-            Intent(context, SetupActivity::class.java).setAction(SetupActivity.ACTION_RESUME_SETUP)
-
-        override fun parseResult(resultCode: Int, intent: Intent?): Boolean =
-            resultCode == Activity.RESULT_OK
     }
 }

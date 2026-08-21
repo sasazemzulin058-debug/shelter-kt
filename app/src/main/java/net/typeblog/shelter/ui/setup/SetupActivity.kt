@@ -83,7 +83,16 @@ class SetupActivity : ComponentActivity() {
                     step = next
                     if (next == Step.PROVISIONING) setupProfile()
                 },
-                onFinish = { finishWithResult(step != Step.FAILED) },
+                onRetry = {
+                    // Recovery from a dead provisioning spinner (launcher result
+                    // lost on process recreation) or a failed attempt: re-enter
+                    // the PROVISIONING frame and launch again.
+                    if (step == Step.PROVISIONING || step == Step.FAILED) {
+                        step = Step.PROVISIONING
+                        setupProfile()
+                    }
+                },
+                onFinish = { finishWithResult(true) },
             )
         }
     }

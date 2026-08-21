@@ -43,7 +43,12 @@ class AppListViewModel @Inject constructor(
 
     /** The last "show all" flag is kept so [refresh] can be called parameterless. */
     private var showAll: Boolean = savedStateHandle[KEY_SHOW_ALL] ?: false
-    private var refreshing = false
+    private var currentRefreshJob: kotlinx.coroutines.Job? = null
+    private var siblingVm: AppListViewModel? = null
+
+    fun setSiblingViewModel(sibling: AppListViewModel) {
+        this.siblingVm = sibling
+    }
 
     /**
      * Bind this profile's runtime service handles and (re)load the list. Called by the UI
@@ -60,13 +65,12 @@ class AppListViewModel @Inject constructor(
         repo.loadIcon(packageName)
 
     fun refresh(showAll: Boolean = this.showAll) {
-        if (refreshing) return
         if (_state.value.multiSelectMode) return // original: no refresh mid multi-select
-        refreshing = true
+        currentRefreshJob?.cancel()
         this.showAll = showAll
         _state.update { it.copy(refreshing = true, error = null) }
 
-        viewModelScope.launch {
+        currentRefreshJob = viewModelScope.launch {
             try {
                 val apps = repo.getApps(showAll = showAll)
                 val widgets = if (isRemote) repo.getCrossProfileWidgetProviders() else emptyList()
@@ -85,7 +89,7 @@ class AppListViewModel @Inject constructor(
             } catch (e: Exception) {
                 fail(AppListError.Generic, e)
             } finally {
-                refreshing = false
+                _state.update { it.copy(refreshing = false) }
             }
         }
     }
@@ -115,10 +119,12 @@ class AppListViewModel @Inject constructor(
     // ------------------------------------------------------------------ single-app mutations
 
     fun clone(packageName: String) = mutate {
-        when (repo.installApp(packageName)) {
-            is InstallResult.Ok -> null
-            is InstallResult.CannotInstallSystemApp -> AppListError.Generic
-            is InstallResult.Other -> AppListError.Generic
+        val res = repo.installApp(packageName)
+        if (res is InstallResult.Ok) {
+            siblingVm?.refresh()
+            null
+        } else {
+            AppListError.Generic
         }
     }
 
@@ -130,9 +136,9 @@ class AppListViewModel @Inject constructor(
         }
     }
 
-    fun freeze(packageName: String) = mutate { repo.freeze(packageName); null }
+    fun freeze(packageName: String, onResult: (Boolean) -> Unit = {}) = mutate(onResult) { repo.freeze(packageName); null }
 
-    fun unfreeze(packageName: String) = mutate { repo.unfreeze(packageName); null }
+    fun unfreeze(packageName: String, onResult: (Boolean) -> Unit = {}) = mutate(onResult) { repo.unfreeze(packageName); null }
 
     /** Toggle the work-profile auto-freeze membership; the list reflects it on next refresh. */
     fun toggleAutoFreeze(packageName: String) {
@@ -189,7 +195,7 @@ class AppListViewModel @Inject constructor(
     // ------------------------------------------------------------------ helpers
 
     /** Run one serialized mutation: clear error, mark busy, execute, then refresh. */
-    private fun mutate(block: suspend () -> AppListError?) {
+    private fun mutate(onResult: (Boolean) -> Unit = {}, block: suspend () -> AppListError?) {
         viewModelScope.launch {
             runBusy {
                 var opError: AppListError? = null
@@ -204,7 +210,9 @@ class AppListViewModel @Inject constructor(
                 }
                 if (opError != null) {
                     _state.update { it.copy(error = opError) }
+                    onResult(false)
                 } else {
+                    onResult(true)
                     refresh()
                 }
             }
