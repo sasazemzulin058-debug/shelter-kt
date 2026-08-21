@@ -87,6 +87,13 @@ fun MainScreen(
         onDispose {}
     }
 
+    // Bind each list to its profile's service binder (plus the sibling binder for
+    // clone-to-other-profile) before any refresh runs.
+    LaunchedEffect(serviceMain, serviceWork) {
+        if (serviceMain != null) mainVm.configureServices(serviceMain, serviceWork)
+        if (serviceWork != null) workVm.configureServices(serviceWork, serviceMain)
+    }
+
     LaunchedEffect(searchQuery) {
         mainVm.setSearchQuery(searchQuery)
         workVm.setSearchQuery(searchQuery)

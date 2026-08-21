@@ -13,6 +13,7 @@ import net.typeblog.shelter.data.repository.AppRepository
 import net.typeblog.shelter.data.repository.InstallResult
 import net.typeblog.shelter.data.repository.ServiceUnavailableException
 import net.typeblog.shelter.data.settings.SettingsStore
+import net.typeblog.shelter.services.IShelterService
 import javax.inject.Inject
 
 /**
@@ -43,6 +44,16 @@ class AppListViewModel @Inject constructor(
     /** The last "show all" flag is kept so [refresh] can be called parameterless. */
     private var showAll: Boolean = savedStateHandle[KEY_SHOW_ALL] ?: false
     private var refreshing = false
+
+    /**
+     * Bind this profile's runtime service handles and (re)load the list. Called by the UI
+     * once the activity's ServiceConnections are alive; no-op-safe on an unconfigured repo
+     * (calls then surface [ServiceUnavailableException]).
+     */
+    fun configureServices(service: IShelterService, otherService: IShelterService?) {
+        repo.configure(service, otherService, pruneAutoFreezeOnList = isRemote)
+        refresh()
+    }
 
     /** Freshly loaded icon for a package; call from a CoroutineScope owned by the UI. */
     suspend fun loadIcon(packageName: String): android.graphics.Bitmap =

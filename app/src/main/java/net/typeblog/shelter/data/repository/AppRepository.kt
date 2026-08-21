@@ -15,6 +15,7 @@ import net.typeblog.shelter.services.IShelterService
 import net.typeblog.shelter.util.ApplicationInfoWrapper
 import net.typeblog.shelter.util.UriForwardProxy
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.inject.Inject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -47,15 +48,37 @@ class AppNotFoundException(packageName: String) :
  * The `otherService` (the sibling profile's service) is used for clone-to-other-profile installs,
  * mirroring the original `getOtherService` routing. No Drawable is stored here; icons stay out of
  * durable state and are loaded on demand via [loadIcon].
+ *
+ * The service handles are runtime binders, not Hilt bindings: [configure] installs them once the
+ * activity's ServiceConnections are alive. Until then every call fails with
+ * [ServiceUnavailableException] instead of crashing on a null binder.
  */
-class AppRepository(
-    private val service: IShelterService,
+class AppRepository @Inject constructor(
     private val settings: SettingsStore,
-    private val otherService: IShelterService? = null,
-    private val pruneAutoFreezeOnList: Boolean = false,
+    @Volatile private var pruneAutoFreezeOnList: Boolean = false,
 ) {
 
+    /** Runtime binder for the profile this repository serves; installed by [configure]. */
+    @Volatile private var service: IShelterService? = null
+
+    /** Sibling profile's binder (clone-to-other-profile routing); installed by [configure]. */
+    @Volatile private var otherService: IShelterService? = null
+
     private val cache = HashMap<String, ApplicationInfoWrapper>()
+
+    /**
+     * Bind the runtime service handles for this profile. Must run before any service call;
+     * an unconfigured repository fails its calls with [ServiceUnavailableException].
+     */
+    fun configure(
+        service: IShelterService,
+        otherService: IShelterService?,
+        pruneAutoFreezeOnList: Boolean,
+    ) {
+        this.service = service
+        this.otherService = otherService
+        this.pruneAutoFreezeOnList = pruneAutoFreezeOnList
+    }
 
     // ------------------------------------------------------------------ app list / icon
 
@@ -83,60 +106,70 @@ class AppRepository(
     /** Clone an app into the sibling profile (the original clone-to-other-profile path). */
     suspend fun installApp(packageName: String): InstallResult {
         val wrapper = wrapper(packageName)
-        val target = otherService ?: service
+        val target = otherService ?: requireService()
         return from(awaitInstall { cb -> target.installApp(wrapper, cb) })
     }
 
-    suspend fun installApk(proxy: UriForwardProxy): InstallResult =
-        from(awaitInstall { cb -> service.installApk(proxy, cb) })
+    suspend fun installApk(proxy: UriForwardProxy): InstallResult {
+        val svc = requireService()
+        return from(awaitInstall { cb -> svc.installApk(proxy, cb) })
+    }
 
     /** Uninstall (or, for system apps, disable) an app in the current profile. */
     suspend fun uninstallApp(packageName: String): InstallResult {
         val wrapper = wrapper(packageName)
-        return from(awaitInstall { cb -> service.uninstallApp(wrapper, cb) })
+        val svc = requireService()
+        return from(awaitInstall { cb -> svc.uninstallApp(wrapper, cb) })
     }
 
     suspend fun freeze(packageName: String) {
         val wrapper = wrapper(packageName)
-        syncCall { service.freezeApp(wrapper) }
+        syncCall { it.freezeApp(wrapper) }
     }
 
     suspend fun unfreeze(packageName: String) {
         val wrapper = wrapper(packageName)
-        syncCall { service.unfreezeApp(wrapper) }
+        syncCall { it.unfreezeApp(wrapper) }
     }
 
     // ------------------------------------------------------------------ cross-profile widgets / packages
 
     suspend fun getCrossProfileWidgetProviders(): List<String> =
-        syncCall { service.crossProfileWidgetProviders }
+        syncCall { it.crossProfileWidgetProviders }
 
     suspend fun setCrossProfileWidgetProviderEnabled(packageName: String, enabled: Boolean): Boolean =
-        syncCall { service.setCrossProfileWidgetProviderEnabled(packageName, enabled) }
+        syncCall { it.setCrossProfileWidgetProviderEnabled(packageName, enabled) }
 
     suspend fun getCrossProfilePackages(): List<String> =
-        syncCall { service.crossProfilePackages }
+        syncCall { it.crossProfilePackages }
 
     suspend fun setCrossProfilePackages(packages: List<String>) {
-        syncCall { service.setCrossProfilePackages(packages) }
+        syncCall { it.setCrossProfilePackages(packages) }
     }
 
     // ------------------------------------------------------------------ permission / service control
 
-    suspend fun hasUsageStatsPermission(): Boolean = syncCall { service.hasUsageStatsPermission() }
-    suspend fun hasSystemAlertPermission(): Boolean = syncCall { service.hasSystemAlertPermission() }
-    suspend fun hasAllFileAccessPermission(): Boolean = syncCall { service.hasAllFileAccessPermission() }
+    suspend fun hasUsageStatsPermission(): Boolean = syncCall { it.hasUsageStatsPermission() }
+    suspend fun hasSystemAlertPermission(): Boolean = syncCall { it.hasSystemAlertPermission() }
+    suspend fun hasAllFileAccessPermission(): Boolean = syncCall { it.hasAllFileAccessPermission() }
 
-    suspend fun stopShelterService(kill: Boolean) = syncCall { service.stopShelterService(kill) }
-    suspend fun ping() = syncCall { Unit.also { service.ping() } }
+    suspend fun stopShelterService(kill: Boolean) = syncCall { it.stopShelterService(kill) }
+    suspend fun ping() = syncCall { it.ping(); Unit }
 
     // ------------------------------------------------------------------ helpers
+
+    /** Current service binder, or fail fast when the repository is not configured yet. */
+    private fun requireService(): IShelterService =
+        service ?: throw ServiceUnavailableException(
+            IllegalStateException("ShelterService not configured")
+        )
 
     private fun wrapper(packageName: String): ApplicationInfoWrapper =
         cache[packageName] ?: throw AppNotFoundException(packageName)
 
-    private suspend fun awaitApps(showAll: Boolean): List<ApplicationInfoWrapper> =
-        suspendCancellableCoroutine { cont ->
+    private suspend fun awaitApps(showAll: Boolean): List<ApplicationInfoWrapper> {
+        val svc = requireService()
+        return suspendCancellableCoroutine { cont ->
             val guard = AtomicBoolean(false)
             val callback = object : IGetAppsCallback.Stub() {
                 override fun callback(apps: List<ApplicationInfoWrapper>) {
@@ -146,16 +179,18 @@ class AppRepository(
             }
             cont.invokeOnCancellation { guard.set(true) }
             try {
-                service.getApps(callback, showAll)
+                svc.getApps(callback, showAll)
             } catch (e: RemoteException) {
                 if (guard.compareAndSet(false, true)) {
                     if (cont.isActive) cont.resumeWithException(ServiceUnavailableException(e))
                 }
             }
         }
+    }
 
-    private suspend fun awaitIcon(wrapper: ApplicationInfoWrapper): Bitmap =
-        suspendCancellableCoroutine { cont ->
+    private suspend fun awaitIcon(wrapper: ApplicationInfoWrapper): Bitmap {
+        val svc = requireService()
+        return suspendCancellableCoroutine { cont ->
             val guard = AtomicBoolean(false)
             val callback = object : ILoadIconCallback.Stub() {
                 override fun callback(icon: Bitmap) {
@@ -165,16 +200,18 @@ class AppRepository(
             }
             cont.invokeOnCancellation { guard.set(true) }
             try {
-                service.loadIcon(wrapper, callback)
+                svc.loadIcon(wrapper, callback)
             } catch (e: RemoteException) {
                 if (guard.compareAndSet(false, true)) {
                     if (cont.isActive) cont.resumeWithException(ServiceUnavailableException(e))
                 }
             }
         }
+    }
 
-    private suspend fun awaitInstall(launch: (IAppInstallCallback) -> Unit): Int =
-        suspendCancellableCoroutine { cont ->
+    private suspend fun awaitInstall(launch: (IAppInstallCallback) -> Unit): Int {
+        requireService()
+        return suspendCancellableCoroutine { cont ->
             val guard = AtomicBoolean(false)
             val callback = object : IAppInstallCallback.Stub() {
                 override fun callback(result: Int) {
@@ -191,11 +228,13 @@ class AppRepository(
                 }
             }
         }
+    }
 
-    private suspend fun <T> syncCall(block: () -> T): T =
+    private suspend fun <T> syncCall(block: (IShelterService) -> T): T =
         withContext(Dispatchers.IO) {
+            val svc = requireService()
             try {
-                block()
+                block(svc)
             } catch (e: RemoteException) {
                 throw ServiceUnavailableException(e)
             }
