@@ -59,9 +59,11 @@ object ProfileManager {
      *  - the platform forwarder entry (see
      *    [isTrustedPlatformForwarder]: the public
      *    [ResolveInfo.isCrossProfileIntentForwarderActivity] marker on API 30+,
-     *    or the known platform component identity
-     *    `android`/`com.android.internal.app.IntentForwarderActivity` plus the
-     *    system-application flag on API 24-29) is the ONLY foreign component
+     *    or the known platform component identity — package `android` hosting
+     *    one of `com.android.internal.app.IntentForwarderActivity`,
+     *    `com.android.internal.app.ForwardIntentToParent`, or
+     *    `com.android.internal.app.ForwardIntentToManagedProfile`, plus the
+     *    system-application flag — on API 24-29) is the ONLY foreign component
      *    accepted, and is preferred whenever present;
      *  - this package's exact [DummyActivity] is an accepted context match but
      *    is never chosen as the routing target;
@@ -143,7 +145,10 @@ object ProfileManager {
      * - API 24-29: that marker does not exist (the getter is API 30+ and must
      *   not be referenced outside an `R` gate), so the forwarder is recognized
      *   by its known platform component identity — the framework package
-     *   `android` hosting `com.android.internal.app.IntentForwarderActivity` —
+     *   `android` hosting one of the platform's cross-profile forwarder
+     *   classes: `com.android.internal.app.IntentForwarderActivity`,
+     *   `com.android.internal.app.ForwardIntentToParent`, or
+     *   `com.android.internal.app.ForwardIntentToManagedProfile` —
      *   plus the system-application flag. Requiring the exact class name AND
      *   the platform package blocks third-party impersonation of the class
      *   name; the system flag blocks non-platform resolver entries.
@@ -159,9 +164,10 @@ object ProfileManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)
         }
-        return ai.packageName == "android" &&
-            ai.name == "com.android.internal.app.IntentForwarderActivity" &&
-            isSystemApplication(ai)
+        return ai.packageName == "android" && isSystemApplication(ai) &&
+            (ai.name == "com.android.internal.app.IntentForwarderActivity" ||
+                ai.name == "com.android.internal.app.ForwardIntentToParent" ||
+                ai.name == "com.android.internal.app.ForwardIntentToManagedProfile")
     }
 
     /** True when [ai] belongs to a system application (the platform itself). */
