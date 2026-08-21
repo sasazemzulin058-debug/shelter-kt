@@ -159,12 +159,14 @@ class SetupActivity : ComponentActivity() {
             // profile NOW. The identical bytes ride the platform provisioning
             // admin extras bundle into the managed profile, where the trusted
             // admin entry points install them via AuthManager.installProvisionedSecret.
-            // No `auth_key` intent extra is ever involved, so no exported intent
             // can seed the shared secret.
             val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
             authManager.installProvisionedSecret(secret)
             val adminExtras = PersistableBundle().apply {
-                putByteArray(AuthManager.EXTRA_PROVISIONED_SECRET, secret)
+                putString(
+                    AuthManager.EXTRA_PROVISIONED_SECRET,
+                    android.util.Base64.encodeToString(secret, android.util.Base64.NO_WRAP),
+                )
             }
             return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_SKIP_ENCRYPTION, true)

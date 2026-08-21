@@ -221,8 +221,13 @@ class AuthManager(context: Context) {
                     DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE,
                 )
                 ?: return null
-            val secret = bundle.getByteArray(EXTRA_PROVISIONED_SECRET) ?: return null
-            return if (secret.size == 32) secret else null
+            val encoded = bundle.getString(EXTRA_PROVISIONED_SECRET) ?: return null
+            val secret = try {
+                Base64.decode(encoded, Base64.NO_WRAP)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+            return secret.takeIf { it.size == 32 }
         }
 
         /**
