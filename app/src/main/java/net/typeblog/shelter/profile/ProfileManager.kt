@@ -133,7 +133,7 @@ object ProfileManager {
     @Suppress("DEPRECATION") // FLAG_SYSTEM is the only system-app signal below API 29.
     private fun isSystemApplication(ai: ActivityInfo): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ai.applicationInfo.isSystemApp()
+            (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
         } else {
             (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
         }
