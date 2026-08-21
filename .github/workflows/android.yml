@@ -47,6 +47,17 @@ jobs:
       - name: Lint
         run: gradle lintDebug --no-daemon
 
+
+      - name: Assemble release APK
+        run: gradle assembleRelease --no-daemon
+
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
       - name: Upload debug APK
         if: always()
         uses: actions/upload-artifact@v4
