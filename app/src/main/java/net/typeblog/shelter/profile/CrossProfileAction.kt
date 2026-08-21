@@ -377,7 +377,7 @@ object CrossProfileAction {
     }
 
     private fun checkAllFileAccessPermission(): Boolean =
-        Environment.isExternalStorageManager()
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 
     private fun checkSystemAlertPermission(activity: DummyActivity): Boolean {
         val appOps = activity.getSystemService(android.app.AppOpsManager::class.java)

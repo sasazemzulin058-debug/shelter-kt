@@ -112,7 +112,8 @@ object Utility {
     fun checkSystemAlertPermission(context: Context): Boolean =
         checkSpecialAccessPermission(context, AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW)
 
-    fun checkAllFileAccessPermission(): Boolean = Environment.isExternalStorageManager()
+    fun checkAllFileAccessPermission(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 
     private fun checkSpecialAccessPermission(context: Context, name: String): Boolean {
         val appOps = context.getSystemService(AppOpsManager::class.java)
