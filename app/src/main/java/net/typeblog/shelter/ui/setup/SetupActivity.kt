@@ -1,6 +1,7 @@
 package net.typeblog.shelter.ui.setup
 
 import android.app.admin.DevicePolicyManager
+import android.os.PersistableBundle
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
@@ -162,7 +163,7 @@ class SetupActivity : ComponentActivity() {
             // can seed the shared secret.
             val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
             authManager.installProvisionedSecret(secret)
-            val adminExtras = Bundle().apply {
+            val adminExtras = PersistableBundle().apply {
                 putByteArray(AuthManager.EXTRA_PROVISIONED_SECRET, secret)
             }
             return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)

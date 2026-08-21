@@ -137,7 +137,7 @@ fun MainScreen(
         (selectedTab == 1 && workState.multiSelectMode)
 
     if (showSettings) {
-        SettingsScreen()
+        SettingsScreen(viewModel = settingsVm)
         BackHandler { showSettings = false }
         return
     }

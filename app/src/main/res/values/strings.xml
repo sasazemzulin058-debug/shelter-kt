@@ -27,7 +27,7 @@
     <string name="setup_welcome_title">Welcome to Shelter</string>
     <string name="setup_welcome_desc">Shelter uses Android\'s Work Profile to isolate apps. This setup will create a work profile on your device.</string>
     <string name="setup_permissions_title">Permissions</string>
-    <string name="setup_permissions_desc">Shelter needs device admin permissions to manage the work profile.</string>
+    <string name="setup_permissions_desc">Shelter does not request individual permissions on this screen. Android grants Shelter profile-manager access during Work Profile creation; this access is required to manage apps inside the profile.</string>
     <string name="setup_compatibility_title">Compatibility</string>
     <string name="setup_compatibility_desc">Some devices may have limited Work Profile support. If you experience issues, please check the documentation.</string>
     <string name="setup_ready_title">Ready to setup</string>

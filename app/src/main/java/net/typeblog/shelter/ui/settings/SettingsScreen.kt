@@ -56,7 +56,7 @@ private val AUTO_FREEZE_DELAY_OPTIONS = listOf(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(viewModel: SettingsViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pendingPermission by remember { mutableStateOf<PermissionRequest?>(null) }

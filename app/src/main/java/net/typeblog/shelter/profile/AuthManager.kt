@@ -3,6 +3,7 @@ package net.typeblog.shelter.profile
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
+import android.os.PersistableBundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -216,7 +217,9 @@ class AuthManager(context: Context) {
          */
         fun provisionedSecret(intent: Intent?): ByteArray? {
             val bundle = intent
-                ?.getBundleExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE)
+                ?.getParcelableExtra<PersistableBundle>(
+                    DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE,
+                )
                 ?: return null
             val secret = bundle.getByteArray(EXTRA_PROVISIONED_SECRET) ?: return null
             return if (secret.size == 32) secret else null
