@@ -56,10 +56,13 @@ object ProfileManager {
      * selected here.
      *
      * Selection is deterministic and fail-closed:
-     *  - the platform forwarder entry (confirmed by
-     *    [ResolveInfo.isCrossProfileIntentForwarderActivity] and a
-     *    system-application check) is the ONLY foreign component accepted, and
-     *    is preferred whenever present;
+     *  - the platform forwarder entry (see
+     *    [isTrustedPlatformForwarder]: the public
+     *    [ResolveInfo.isCrossProfileIntentForwarderActivity] marker on API 30+,
+     *    or the known platform component identity
+     *    `android`/`com.android.internal.app.IntentForwarderActivity` plus the
+     *    system-application flag on API 24-29) is the ONLY foreign component
+     *    accepted, and is preferred whenever present;
      *  - this package's exact [DummyActivity] is an accepted context match but
      *    is never chosen as the routing target;
      *  - any other handler — a third-party app declaring the action, a clone,
@@ -100,8 +103,7 @@ object ProfileManager {
                 localDummy = true
                 continue
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)) {
+            if (isTrustedPlatformForwarder(ri, ai)) {
                 val candidate = ComponentName(ai.packageName, ai.name)
                 if (forwarder != null && forwarder != candidate) {
                     throw IllegalStateException(
@@ -130,14 +132,42 @@ object ProfileManager {
         throw IllegalStateException("Cannot find a Shelter counterpart component")
     }
 
+    /**
+     * True when [ri] is the platform component that forwards intents into the
+     * other profile (the only component that preserves the target-user
+     * identity).
+     *
+     * - API 30+ (`R`): the platform publishes the public
+     *   [ResolveInfo.isCrossProfileIntentForwarderActivity] marker, which is
+     *   combined with the system-application check.
+     * - API 24-29: that marker does not exist (the getter is API 30+ and must
+     *   not be referenced outside an `R` gate), so the forwarder is recognized
+     *   by its known platform component identity — the framework package
+     *   `android` hosting `com.android.internal.app.IntentForwarderActivity` —
+     *   plus the system-application flag. Requiring the exact class name AND
+     *   the platform package blocks third-party impersonation of the class
+     *   name; the system flag blocks non-platform resolver entries.
+     *
+     * Device prerequisite: managed-profile devices whose platform routes
+     * cross-profile intents through `com.android.internal.app.IntentForwarderActivity`
+     * (AOSP/SAF-style and most OEM builds). OEM variants that use a different
+     * platform forwarder class fail closed here, exactly like the documented
+     * prerequisite of [resolveCounterpart]; no arbitrary system handler is
+     * ever accepted.
+     */
+    private fun isTrustedPlatformForwarder(ri: ResolveInfo, ai: ActivityInfo): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)
+        }
+        return ai.packageName == "android" &&
+            ai.name == "com.android.internal.app.IntentForwarderActivity" &&
+            isSystemApplication(ai)
+    }
+
     /** True when [ai] belongs to a system application (the platform itself). */
     @Suppress("DEPRECATION") // FLAG_SYSTEM is the only system-app signal below API 29.
     private fun isSystemApplication(ai: ActivityInfo): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-        } else {
-            (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-        }
+        (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
 
     /**
      * Repoint [intent] at the platform component that routes it into the
