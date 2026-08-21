@@ -219,7 +219,7 @@ class CrossProfileDocumentsProvider : DocumentsProvider() {
         return try {
             val fileInfo = service.loadFileMeta(documentId)
             val result = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
-            includeFile(result, fileInfo)
+            includeFile(result, fileInfo?.mapKeys { it.key.toString() })
             result
         } catch (e: RemoteException) {
             null

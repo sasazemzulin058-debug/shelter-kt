@@ -131,6 +131,87 @@ class AuthManager(context: Context) {
         }
 
         private val random = SecureRandom()
+
+        /**
+         * Canonical primitive action+extras fingerprint (sorted key=value), with
+         * the marker extras and the HMAC/bootstrap extras excluded so that
+         * registration-time and check-time digests agree.
+         */
+        private fun sameProcessDigest(intent: Intent): String {
+            val sb = StringBuilder(intent.action ?: "")
+            val extras = intent.extras
+            if (extras != null) {
+                val parts = ArrayList<String>()
+                for (key in extras.keySet()) {
+                    if (key in SAME_PROCESS_EXCLUDED_EXTRAS) continue
+                    val v = extras.get(key) ?: continue
+                    when (v) {
+                        is String -> parts += "$key=$v"
+                        is Int -> parts += "$key=$v"
+                        is Long -> parts += "$key=$v"
+                        is Boolean -> parts += "$key=$v"
+                        is Float -> parts += "$key=$v"
+                        is Double -> parts += "$key=$v"
+                        is Array<*> -> parts += "$key=${v.joinToString(",")}"
+                    }
+                }
+                parts.sort()
+                sb.append('&').append(parts.joinToString("&"))
+            }
+            val md = MessageDigest.getInstance("SHA-256")
+            return md.digest(sb.toString().toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+        }
+
+        /**
+         * Register that [intent] will be delivered to the counterpart same-process
+         * activity without a signature. Arms a process-local one-shot random token
+         * bound to the exact action and a digest of the intent's primitive extras,
+         * stamps the marker extras onto [intent], and returns the token. The grant
+         * is valid for at most 5 seconds and is consumed atomically by
+         * [verifySameProcess]. Process-local and unpredictable, so a cross-process
+         * attacker cannot fabricate the bypass.
+         */
+        @Synchronized
+        fun registerSameProcess(intent: Intent): String {
+            // Bound the registry: drop everything on overflow so a buggy caller
+            // cannot grow it without limit (the newest grant always survives).
+            if (sameProcessGrants.size >= SAME_PROCESS_GRANT_CAP) sameProcessGrants.clear()
+            sameProcessGrants.entries.removeAll { it.value.expiresAt <= System.currentTimeMillis() }
+            val now = System.currentTimeMillis()
+            val token = java.util.UUID.randomUUID().toString()
+            sameProcessGrants[token] = SameProcessGrant(
+                action = intent.action ?: "",
+                digest = sameProcessDigest(intent),
+                expiresAt = now + SAME_PROCESS_WINDOW_MS,
+            )
+            intent.putExtra(EXTRA_SAME_PROCESS, true)
+            intent.putExtra(EXTRA_SAME_PROCESS_TOKEN, token)
+            return token
+        }
+
+        /**
+         * Atomically verify and consume a same-process token grant carried by
+         * [intent]. Accepts only the original same-process actions, requires the
+         * marker extras, a live grant whose action and primitive-extras digest
+         * match, and consumes the grant on success (one-shot) and on any failing
+         * match (fail closed — no retry with the same token).
+         */
+        @Synchronized
+        fun verifySameProcess(intent: Intent): Boolean {
+            val action = intent.action ?: return false
+            if (action !in Actions.SAME_PROCESS_ACTIONS) return false
+            if (!intent.getBooleanExtra(EXTRA_SAME_PROCESS, false)) return false
+            val token = intent.getStringExtra(EXTRA_SAME_PROCESS_TOKEN)
+            if (token.isNullOrEmpty()) return false
+
+            val grant = sameProcessGrants[token] ?: return false
+            sameProcessGrants.remove(token) // consume: one-shot, no retry
+            if (System.currentTimeMillis() > grant.expiresAt) return false
+            if (grant.action != action) return false
+            if (grant.digest != sameProcessDigest(intent)) return false
+            return true
+        }
     }
 
     // ------------------------------------------------------------------ helpers
@@ -243,24 +324,8 @@ class AuthManager(context: Context) {
      * [verifySameProcess]. Process-local and unpredictable, so a cross-process
      * attacker cannot fabricate the bypass.
      */
-    @JvmStatic
-    @Synchronized
-    fun registerSameProcess(intent: Intent): String {
-        // Bound the registry: drop everything on overflow so a buggy caller
-        // cannot grow it without limit (the newest grant always survives).
-        if (sameProcessGrants.size >= SAME_PROCESS_GRANT_CAP) sameProcessGrants.clear()
-        sameProcessGrants.entries.removeAll { it.value.expiresAt <= System.currentTimeMillis() }
-        val now = System.currentTimeMillis()
-        val token = java.util.UUID.randomUUID().toString()
-        sameProcessGrants[token] = SameProcessGrant(
-            action = intent.action ?: "",
-            digest = sameProcessDigest(intent),
-            expiresAt = now + SAME_PROCESS_WINDOW_MS,
-        )
-        intent.putExtra(EXTRA_SAME_PROCESS, true)
-        intent.putExtra(EXTRA_SAME_PROCESS_TOKEN, token)
-        return token
-    }
+    fun registerSameProcess(intent: Intent): String =
+        Companion.registerSameProcess(intent)
 
     /**
      * Mark this profile as being in an explicit provisioning/bootstrap state,
@@ -435,53 +500,8 @@ class AuthManager(context: Context) {
      * match, and consumes the grant on success (one-shot) and on any failing
      * match (fail closed — no retry with the same token).
      */
-    @JvmStatic
-    @Synchronized
-    fun verifySameProcess(intent: Intent): Boolean {
-        val action = intent.action ?: return false
-        if (action !in Actions.SAME_PROCESS_ACTIONS) return false
-        if (!intent.getBooleanExtra(EXTRA_SAME_PROCESS, false)) return false
-        val token = intent.getStringExtra(EXTRA_SAME_PROCESS_TOKEN)
-        if (token.isNullOrEmpty()) return false
-
-        val grant = sameProcessGrants[token] ?: return false
-        sameProcessGrants.remove(token) // consume: one-shot, no retry
-        if (System.currentTimeMillis() > grant.expiresAt) return false
-        if (grant.action != action) return false
-        if (grant.digest != sameProcessDigest(intent)) return false
-        return true
-    }
-
-    /**
-     * Canonical primitive action+extras fingerprint (sorted key=value), with
-     * the marker extras and the HMAC/bootstrap extras excluded so that
-     * registration-time and check-time digests agree.
-     */
-    private fun sameProcessDigest(intent: Intent): String {
-        val sb = StringBuilder(intent.action ?: "")
-        val extras = intent.extras
-        if (extras != null) {
-            val parts = ArrayList<String>()
-            for (key in extras.keySet()) {
-                if (key in SAME_PROCESS_EXCLUDED_EXTRAS) continue
-                val v = extras.get(key) ?: continue
-                when (v) {
-                    is String -> parts += "$key=$v"
-                    is Int -> parts += "$key=$v"
-                    is Long -> parts += "$key=$v"
-                    is Boolean -> parts += "$key=$v"
-                    is Float -> parts += "$key=$v"
-                    is Double -> parts += "$key=$v"
-                    is Array<*> -> parts += "$key=${v.joinToString(",")}"
-                }
-            }
-            parts.sort()
-            sb.append('&').append(parts.joinToString("&"))
-        }
-        val md = java.security.MessageDigest.getInstance("SHA-256")
-        return md.digest(sb.toString().toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-    }
+    fun verifySameProcess(intent: Intent): Boolean =
+        Companion.verifySameProcess(intent)
 
     /** Forget the shared secret and reset local state (called at setup). */
     fun reset() {
