@@ -55,8 +55,11 @@ class AppNotFoundException(packageName: String) :
  */
 class AppRepository @Inject constructor(
     private val settings: SettingsStore,
-    @Volatile private var pruneAutoFreezeOnList: Boolean = false,
 ) {
+
+    /** Work-profile-only cleanup of the auto-freeze list; set at runtime by [configure].
+     * Not a constructor binding: no Hilt Boolean provider exists. */
+    @Volatile private var pruneAutoFreezeOnList: Boolean = false
 
     /** Runtime binder for the profile this repository serves; installed by [configure]. */
     @Volatile private var service: IShelterService? = null
@@ -103,10 +106,13 @@ class AppRepository @Inject constructor(
 
     // ------------------------------------------------------------------ install / uninstall / freeze
 
-    /** Clone an app into the sibling profile (the original clone-to-other-profile path). */
+    /** Clone an app into the sibling profile (the original clone-to-other-profile path).
+     * The sibling binder is required: clone must never fall back to the current profile. */
     suspend fun installApp(packageName: String): InstallResult {
         val wrapper = wrapper(packageName)
-        val target = otherService ?: requireService()
+        val target = otherService ?: throw ServiceUnavailableException(
+            IllegalStateException("Sibling service not configured; clone unavailable")
+        )
         return from(awaitInstall { cb -> target.installApp(wrapper, cb) })
     }
 
