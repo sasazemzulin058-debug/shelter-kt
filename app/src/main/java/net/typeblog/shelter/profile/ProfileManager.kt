@@ -100,7 +100,8 @@ object ProfileManager {
                 localDummy = true
                 continue
             }
-            if (ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)) {
                 val candidate = ComponentName(ai.packageName, ai.name)
                 if (forwarder != null && forwarder != candidate) {
                     throw IllegalStateException(
