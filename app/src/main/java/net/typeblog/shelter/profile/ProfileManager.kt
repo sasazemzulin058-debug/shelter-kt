@@ -242,7 +242,10 @@ object ProfileManager {
             FilterSpec(crossProfileFilter(Actions.FREEZE_ALL_IN_LIST), DevicePolicyManager.FLAG_MANAGED_CAN_ACCESS_PARENT),
             // Used by FreezeService in the profile.
             FilterSpec(crossProfileFilter(Actions.PUBLIC_FREEZE_ALL), DevicePolicyManager.FLAG_PARENT_CAN_ACCESS_MANAGED),
+            // Parent starts manual recovery in managed profile.
             FilterSpec(crossProfileFilter(Actions.FINALIZE_PROVISION), DevicePolicyManager.FLAG_PARENT_CAN_ACCESS_MANAGED),
+            // Managed profile returns authenticated completion to parent.
+            FilterSpec(crossProfileFilter(Actions.FINALIZE_PROVISION), DevicePolicyManager.FLAG_MANAGED_CAN_ACCESS_PARENT),
             FilterSpec(crossProfileFilter(Actions.START_FILE_SHUTTLE), DevicePolicyManager.FLAG_MANAGED_CAN_ACCESS_PARENT),
             FilterSpec(crossProfileFilter(Actions.START_FILE_SHUTTLE_2), DevicePolicyManager.FLAG_PARENT_CAN_ACCESS_MANAGED),
             FilterSpec(crossProfileFilter(Actions.SYNCHRONIZE_PREFERENCE), DevicePolicyManager.FLAG_MANAGED_CAN_ACCESS_PARENT),

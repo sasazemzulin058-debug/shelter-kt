@@ -102,12 +102,12 @@ class SetupActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // DummyActivity starts this activity once the provision is finalized.
-        if (ACTION_PROFILE_PROVISIONED == intent.action && ProfileManager.isWorkProfileAvailable(this, settings)) {
+        // Finalization has already been authenticated by DummyActivity before
+        // this explicit callback reaches the setup activity.
+        if (ACTION_PROFILE_PROVISIONED == intent.action) {
             finishWithResult(true)
         }
     }
-
     private fun finishWithResult(succeeded: Boolean) {
         setResult(if (succeeded) RESULT_OK else RESULT_CANCELED)
         finish()
@@ -142,18 +142,21 @@ class SetupActivity : ComponentActivity() {
 
     private fun setupProfileCb(result: Boolean) {
         if (result) {
-            if (ProfileManager.isWorkProfileAvailable(this, settings)) {
-                // On Oreo+ FinalizeActivity takes over; nothing more to do here.
+            // On Oreo+, ACTION_PROVISIONING_SUCCESSFUL is delivered only after
+            // FinalizeActivity has run. Do not probe the resolver here: Android
+            // may publish it slightly later, and the original contract waits on
+            // this callback itself.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 finishWithResult(true)
                 return
             }
-            // Provisioning finished but Shelter still needs to be brought up
-            // inside the profile (pre-O). Persist so setup resumes after death.
+            if (ProfileManager.isWorkProfileAvailable(this, settings)) {
+                finishWithResult(true)
+                return
+            }
             settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
             step = Step.ACTION_REQUIRED
         } else {
-            // Provisioning failed/cancelled: revoke the installed secret so a
-            // stale secret cannot be used later. A retry re-generates one.
             authManager.reset()
             step = Step.FAILED
         }
