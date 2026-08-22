@@ -32,16 +32,22 @@ class FinalizeActivity : Activity() {
         }
 
         try {
+            Log.i(TAG, "policy:start")
             val settings = SettingsStore(this)
             ProfileManager.enforceWorkProfilePolicies(this, settings)
+            Log.i(TAG, "policy:work_filters:done")
             ProfileManager.enforceUserRestrictions(this)
+            Log.i(TAG, "policy:restrictions:done")
             ProfileManager.applyProfileSettings(this, settings)
+            Log.i(TAG, "policy:settings:done")
 
             setResult(RESULT_OK)
+            Log.i(TAG, "compliance:result_ok")
         } catch (error: RuntimeException) {
             Log.e(TAG, "policy compliance failed", error)
             setResult(RESULT_CANCELED)
         }
+        Log.i(TAG, "compliance:finish")
         finish()
     }
 }
