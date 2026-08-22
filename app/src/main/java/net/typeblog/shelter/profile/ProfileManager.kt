@@ -93,7 +93,7 @@ object ProfileManager {
      */
     private fun resolveCounterpart(context: Context, intent: Intent): ComponentName {
         val resolved: List<ResolveInfo> = context.packageManager.queryIntentActivities(intent, 0)
-        Log.i(TAG, "resolve action=${intent.action} count=${resolved.size} names=${resolved.map { it.activityInfo?.let { ai -> \"${ai.packageName}/${ai.name}\" } }}")
+        Log.i(TAG, "resolve action=${intent.action} count=${resolved.size} names=${resolved.map { it.activityInfo?.let { ai -> "${ai.packageName}/${ai.name}" } }}")
         if (resolved.isEmpty()) {
             throw IllegalStateException("Cannot find a Shelter counterpart component")
         }
