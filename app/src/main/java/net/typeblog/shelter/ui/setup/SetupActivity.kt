@@ -167,8 +167,8 @@ class SetupActivity : ComponentActivity() {
         if (result) {
             Log.i(TAG, "provision success; profileOwner=${ProfileManager.isProfileOwner(this)}")
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                Log.i(TAG, "O+ result; returning RESULT_OK")
-                finishWithResult(true)
+                Log.i(TAG, "O+ result; waiting for ACTION_PROFILE_PROVISIONED")
+                step = Step.PROVISIONING
                 return
             }
             val available = ProfileManager.isWorkProfileAvailable(this, settings)
