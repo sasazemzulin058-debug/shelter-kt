@@ -93,7 +93,12 @@ class SetupActivity : ComponentActivity() {
                         setupProfile()
                     }
                 },
-                onFinish = { finishWithResult(true) },
+                onFinish = {
+                    // ACTION_REQUIRED is not completed provisioning. Returning OK
+                    // makes MainActivity launch the same screen again because
+                    // HAS_SETUP is still false; close without claiming success.
+                    finishWithResult(false)
+                },
             )
         }
     }
