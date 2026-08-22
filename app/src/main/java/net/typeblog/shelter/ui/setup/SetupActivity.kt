@@ -188,6 +188,10 @@ class SetupActivity : ComponentActivity() {
             }
             return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_SKIP_ENCRYPTION, true)
+                // API 36 may configure a role holder that is not installed on
+                // this device. Permit platform provisioning instead of retrying
+                // the unavailable role-holder path.
+                .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ALLOW_OFFLINE, true)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME, admin)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, adminExtras)
         }
