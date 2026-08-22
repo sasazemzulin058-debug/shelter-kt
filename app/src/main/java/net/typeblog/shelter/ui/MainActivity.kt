@@ -135,13 +135,19 @@ class MainActivity : ComponentActivity() {
     private fun init() {
         val isSettingUp = settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)
         val hasSetup = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
-        Log.i(TAG, "init isSettingUp=$isSettingUp hasSetup=$hasSetup profileOwner=${ProfileManager.isProfileOwner(this)}")
+        val workProfileAvailable =
+            if (isSettingUp || !hasSetup) ProfileManager.isWorkProfileAvailable(this, settings) else false
+        Log.i(TAG, "init isSettingUp=$isSettingUp hasSetup=$hasSetup profileOwner=${ProfileManager.isProfileOwner(this)} workProfileAvailable=$workProfileAvailable")
 
-        if (isSettingUp && !ProfileManager.isWorkProfileAvailable(this, settings)) {
+        if (isSettingUp && !workProfileAvailable) {
             Log.i(TAG, "launching resume setup")
             val intent = Intent(this, SetupActivity::class.java)
                 .setAction(Actions.ACTION_RESUME_SETUP)
             setupLauncher.launch(intent)
+        } else if (!hasSetup && workProfileAvailable) {
+            Log.i(TAG, "existing work profile recovered")
+            ProfileManager.applyProfileSettings(this, settings)
+            bindServices()
         } else if (!hasSetup) {
             Log.i(TAG, "launching initial setup")
             setupLauncher.launch(Intent(this, SetupActivity::class.java))
@@ -150,6 +156,7 @@ class MainActivity : ComponentActivity() {
             ProfileManager.applyProfileSettings(this, settings)
             bindServices()
         }
+
     }
 
     private fun bindServices() {

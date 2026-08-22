@@ -136,11 +136,15 @@ class SetupActivity : ComponentActivity() {
             return
         }
         authManager.reset()
+        // Mark recovery state before handing control to ManagedProvisioning.
+        // Profile creation may complete after this task is killed.
+        settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
         try {
             Log.i(TAG, "launch provisioning intent")
             provisionProfile.launch(Unit)
         } catch (error: ActivityNotFoundException) {
             Log.e(TAG, "provisioning activity not found", error)
+            settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, false)
             step = Step.FAILED
         }
     }
