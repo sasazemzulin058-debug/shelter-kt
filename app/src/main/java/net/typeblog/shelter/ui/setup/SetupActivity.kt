@@ -60,10 +60,10 @@ class SetupActivity : ComponentActivity() {
     @Inject lateinit var settings: SettingsStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Log.i(TAG, "onCreate action=${intent.action} savedStep=${savedInstanceState?.getString(STATE_STEP)} profileOwner=${ProfileManager.isProfileOwner(this)}")
-        Log.i(TAG, "flags isSettingUp=${settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)} hasSetup=${settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)}")
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        Log.i(TAG, "onCreate action=${intent.action} savedStep=${savedInstanceState?.getString(STATE_STEP)} profileOwner=${ProfileManager.isProfileOwner(this)}")
+        Log.i(TAG, "flags isSettingUp=${settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)} hasSetup=${settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)}")
         if (ACTION_PROFILE_PROVISIONED == intent.action && ProfileManager.isWorkProfileAvailable(this, settings)) {
             Log.i(TAG, "profile-provisioned action accepted; launching MainActivity")
             startActivity(Intent(this, MainActivity::class.java))
