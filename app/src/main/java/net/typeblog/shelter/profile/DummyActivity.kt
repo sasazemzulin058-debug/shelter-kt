@@ -81,19 +81,12 @@ class DummyActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-
+        setIntent(intent)
         when (intent.action) {
-            Actions.PACKAGEINSTALLER_CALLBACK -> CrossProfileAction.onNewIntent(this, intent)
-            Actions.START_FILE_SHUTTLE, Actions.START_FILE_SHUTTLE_2 -> {
-                // A shuttle request delivered to a live singleTask instance is a
-                // fresh transaction. The onCreate gate covered only the original
-                // intent, so re-authenticate and re-dispatch; setIntent first so
-                // the handler reads this request's extras (matching the onCreate
-                // path). The FileShuttle binder gate inside
-                // CrossProfileAction.doStartFileShuttle still applies.
-                setIntent(intent)
-                init()
-            }
+            Actions.FINALIZE_PROVISION,
+            Actions.PACKAGEINSTALLER_CALLBACK,
+            Actions.START_FILE_SHUTTLE,
+            Actions.START_FILE_SHUTTLE_2 -> init()
             else -> Unit
         }
     }
