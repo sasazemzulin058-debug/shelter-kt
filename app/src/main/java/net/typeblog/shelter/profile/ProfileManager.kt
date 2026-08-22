@@ -69,11 +69,11 @@ object ProfileManager {
      *    accepted, and is preferred whenever present;
      *  - this package's exact [DummyActivity] is an accepted context match but
      *    is never chosen as the routing target;
-     *  - any other handler — a third-party app declaring the action, a clone,
-     *    an overlay — makes the resolution ambiguous/untrusted and the whole
-     *    transfer is rejected. It is never skipped in favor of the forwarder:
-     *    an attacker who can interpose on the cross-profile path would
-     *    otherwise receive signed payloads and the bootstrap key.
+     *  - unrelated handlers are ignored because they cannot become the routing
+     *    target; a component marked as a platform forwarder but failing the
+     *    platform identity checks is rejected as a masquerade;
+     *  - multiple platform forwarders are rejected as ambiguous/untrusted.
+     *    The selected component is always the trusted platform forwarder.
      *
      * Device prerequisite: AOSP/SAF-style managed-profile devices where a
      * cross-profile intent filter registered by this app's profile owner
@@ -89,7 +89,9 @@ object ProfileManager {
      *  - only the local [DummyActivity] matches -> counterpart unreachable
      *    (no profile or filters cleared); equivalent to the original app's
      *    "Cannot find an intent in other profile";
-     *  - a non-system handler matches -> ambiguous/untrusted, refused.
+     *  - a marked/known forwarder that fails platform identity checks, or
+     *    multiple trusted forwarders, is rejected; unrelated handlers are
+     *    ignored.
      */
     private fun resolveCounterpart(context: Context, intent: Intent): ComponentName {
         val resolved: List<ResolveInfo> = context.packageManager.queryIntentActivities(intent, 0)
@@ -108,7 +110,15 @@ object ProfileManager {
                 localDummy = true
                 continue
             }
-            if (isTrustedPlatformForwarder(ri, ai)) {
+            val markedForwarder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                ri.isCrossProfileIntentForwarderActivity
+            val legacyForwarderName = Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
+                isKnownPlatformForwarderName(ai.name)
+            if (markedForwarder || legacyForwarderName) {
+                if (!isTrustedPlatformForwarder(ri, ai)) {
+                    throw IllegalStateException(
+                        "Counterpart intent resolves to an unverified platform forwarder ${ai.packageName}/${ai.name}; refusing")
+                }
                 val candidate = ComponentName(ai.packageName, ai.name)
                 if (forwarder != null && forwarder != candidate) {
                     throw IllegalStateException(
@@ -117,8 +127,7 @@ object ProfileManager {
                 forwarder = candidate
                 continue
             }
-            throw IllegalStateException(
-                "Counterpart intent resolves to unverified component ${ai.packageName}/${ai.name}; refusing ambiguous routing")
+            // Unrelated handlers cannot receive traffic because only forwarder is selected.
         }
         if (forwarder != null) return forwarder
         if (localDummy) throw IllegalStateException("Cannot find a Shelter counterpart component")
@@ -151,14 +160,17 @@ object ProfileManager {
      * prerequisite of [resolveCounterpart]; no arbitrary system handler is
      * ever accepted.
      */
+    private fun isKnownPlatformForwarderName(name: String): Boolean =
+        name == "com.android.internal.app.IntentForwarderActivity" ||
+            name == "com.android.internal.app.ForwardIntentToParent" ||
+            name == "com.android.internal.app.ForwardIntentToManagedProfile"
+
     private fun isTrustedPlatformForwarder(ri: ResolveInfo, ai: ActivityInfo): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return ri.isCrossProfileIntentForwarderActivity && isSystemApplication(ai)
         }
         return ai.packageName == "android" && isSystemApplication(ai) &&
-            (ai.name == "com.android.internal.app.IntentForwarderActivity" ||
-                ai.name == "com.android.internal.app.ForwardIntentToParent" ||
-                ai.name == "com.android.internal.app.ForwardIntentToManagedProfile")
+            isKnownPlatformForwarderName(ai.name)
     }
 
     /** True when [ai] belongs to a system application (the platform itself). */
