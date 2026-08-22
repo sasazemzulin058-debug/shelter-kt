@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import dagger.hilt.android.AndroidEntryPoint
 import net.typeblog.shelter.data.settings.SettingsStore
 import net.typeblog.shelter.profile.AuthManager
+import net.typeblog.shelter.profile.Actions
 import net.typeblog.shelter.profile.ProfileManager
 import net.typeblog.shelter.receivers.DeviceAdminReceiver
 import net.typeblog.shelter.ui.MainActivity
@@ -79,20 +80,16 @@ class SetupActivity : ComponentActivity() {
                 onBack = { step = step.onBack() },
                 onNext = {
                     val next = step.onNext()
-                    // Show the PleaseWait frame before provisioning launches:
-                    // it is the current frame while the system UI is up.
                     step = next
                     if (next == Step.PROVISIONING) setupProfile()
                 },
                 onRetry = {
-                    // Recovery from a dead provisioning spinner (launcher result
-                    // lost on process recreation) or a failed attempt: re-enter
-                    // the PROVISIONING frame and launch again.
                     if (step == Step.PROVISIONING || step == Step.FAILED) {
                         step = Step.PROVISIONING
                         setupProfile()
                     }
                 },
+                onFinish = { finalizeProvisionManually() },
             )
         }
     }
@@ -114,6 +111,17 @@ class SetupActivity : ComponentActivity() {
     private fun finishWithResult(succeeded: Boolean) {
         setResult(if (succeeded) RESULT_OK else RESULT_CANCELED)
         finish()
+    }
+    private fun finalizeProvisionManually() {
+        val intent = Intent(Actions.FINALIZE_PROVISION).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            ProfileManager.transferIntentToProfile(this, intent, authManager)
+            startActivity(intent)
+        } catch (_: IllegalStateException) {
+            step = Step.ACTION_REQUIRED
+        }
     }
 
     private fun setupProfile() {

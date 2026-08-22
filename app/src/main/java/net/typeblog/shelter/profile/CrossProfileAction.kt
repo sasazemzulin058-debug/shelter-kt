@@ -98,16 +98,11 @@ object CrossProfileAction {
                 activity.finish()
                 return
             }
-            // On pre-O the provisioning receiver notifies the parent profile after
-            // policies are applied; on O+ FinalizeActivity drives activity-based flow.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                val intent = Intent(Actions.FINALIZE_PROVISION)
-                // Sign with the shared secret installed from the admin extras:
-                // the parent side (which holds the same secret) accepts this as
-                // a provable same-secret delivery — no forgeable marker, no TOFU.
-                ProfileManager.transferIntentToProfile(activity, intent, activity.auth)
-                activity.startActivity(intent)
-            }
+            // Return authenticated completion to parent for every API level.
+            // The parent is the only side that commits HAS_SETUP/IS_SETTING_UP.
+            val intent = Intent(Actions.FINALIZE_PROVISION)
+            ProfileManager.transferIntentToProfile(activity, intent, activity.auth)
+            activity.startActivity(intent)
             activity.finish()
         } else {
             // Parent profile. Mutate the durable setup state ONLY when this

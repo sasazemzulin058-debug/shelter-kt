@@ -68,12 +68,11 @@ enum class Step {
         get() = when (this) {
             Step.WELCOME, Step.PERMISSIONS, Step.COMPATIBILITY -> ButtonAction.NEXT
             Step.READY -> ButtonAction.START
-            // PROVISIONING and FAILED both offer a retry: re-launch provisioning
-            // after a dead spinner (lost launcher result) or a failed attempt.
+            // Provisioning can finish through the system callback or a delayed
+            // notification. A signed retry is safe and does not mutate state
+            // until the managed profile authenticates it.
+            Step.ACTION_REQUIRED -> ButtonAction.FINISH
             Step.PROVISIONING, Step.FAILED -> ButtonAction.RETRY
-            // Finalization is driven by the system callback/notification. There
-            // is no valid user action that can claim setup completion here.
-            Step.ACTION_REQUIRED -> null
         }
 
     companion object {
@@ -82,7 +81,7 @@ enum class Step {
 }
 
 enum class ButtonAction {
-    NEXT, START, RETRY
+    NEXT, START, RETRY, FINISH
 }
 
 private data class StepContent(
@@ -179,6 +178,10 @@ fun SetupScreen(
                 ButtonAction.RETRY -> Button(
                     onClick = onRetry, modifier = Modifier.widthIn(min = 200.dp)) {
                     Text(stringResource(R.string.setup_button_retry))
+                }
+                ButtonAction.FINISH -> Button(
+                    onClick = onFinish, modifier = Modifier.widthIn(min = 200.dp)) {
+                    Text(stringResource(R.string.setup_button_finish))
                 }
                 null -> Unit
             }
