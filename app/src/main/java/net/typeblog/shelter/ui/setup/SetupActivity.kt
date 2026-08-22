@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -46,6 +47,7 @@ class SetupActivity : ComponentActivity() {
         const val ACTION_RESUME_SETUP = "net.typeblog.shelter.RESUME_SETUP"
         const val ACTION_PROFILE_PROVISIONED = "net.typeblog.shelter.PROFILE_PROVISIONED"
         private const val STATE_STEP = "setup_step"
+        private const val TAG = "ShelterSetup"
     }
 
     @Inject lateinit var settings: SettingsStore
@@ -56,15 +58,13 @@ class SetupActivity : ComponentActivity() {
             setupProfileCb(result)
         }
 
-    private var step by mutableStateOf(Step.WELCOME)
-
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(TAG, "onCreate action=${intent.action} savedStep=${savedInstanceState?.getString(STATE_STEP)} profileOwner=${ProfileManager.isProfileOwner(this)}")
+        Log.i(TAG, "flags isSettingUp=${settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)} hasSetup=${settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)}")
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-
-        // The user may tap the "finish provisioning" notification while this
-        // activity was removed from recents, which starts a fresh instance.
         if (ACTION_PROFILE_PROVISIONED == intent.action && ProfileManager.isWorkProfileAvailable(this, settings)) {
+            Log.i(TAG, "profile-provisioned action accepted; launching MainActivity")
             startActivity(Intent(this, MainActivity::class.java))
             finish()
             return
@@ -102,13 +102,14 @@ class SetupActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Finalization has already been authenticated by DummyActivity before
-        // this explicit callback reaches the setup activity.
+        Log.i(TAG, "onNewIntent action=${intent.action}")
         if (ACTION_PROFILE_PROVISIONED == intent.action) {
+            Log.i(TAG, "profile-provisioned callback finishing setup")
             finishWithResult(true)
         }
     }
     private fun finishWithResult(succeeded: Boolean) {
+        Log.i(TAG, "finishWithResult succeeded=$succeeded")
         setResult(if (succeeded) RESULT_OK else RESULT_CANCELED)
         finish()
     }
@@ -126,37 +127,43 @@ class SetupActivity : ComponentActivity() {
 
     private fun setupProfile() {
         val policy = getSystemService(DevicePolicyManager::class.java)
-        if (!policy.isProvisioningAllowed(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)) {
+        val allowed = policy.isProvisioningAllowed(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
+        Log.i(TAG, "setupProfile allowed=$allowed api=${android.os.Build.VERSION.SDK_INT}")
+        if (!allowed) {
+            Log.e(TAG, "provisioning not allowed")
             step = Step.FAILED
             return
         }
-        // The user may have aborted provisioning before without clearing data,
-        // leaving stale auth secrets that would make us believe we can authenticate.
         authManager.reset()
         try {
+            Log.i(TAG, "launch provisioning intent")
             provisionProfile.launch(Unit)
-        } catch (_: ActivityNotFoundException) {
+        } catch (error: ActivityNotFoundException) {
+            Log.e(TAG, "provisioning activity not found", error)
             step = Step.FAILED
         }
     }
 
     private fun setupProfileCb(result: Boolean) {
+        Log.i(TAG, "provision result=$result api=${android.os.Build.VERSION.SDK_INT}")
         if (result) {
-            // On Oreo+, ACTION_PROVISIONING_SUCCESSFUL is delivered only after
-            // FinalizeActivity has run. Do not probe the resolver here: Android
-            // may publish it slightly later, and the original contract waits on
-            // this callback itself.
+            Log.i(TAG, "provision success; profileOwner=${ProfileManager.isProfileOwner(this)}")
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                Log.i(TAG, "O+ result; returning RESULT_OK")
                 finishWithResult(true)
                 return
             }
-            if (ProfileManager.isWorkProfileAvailable(this, settings)) {
+            val available = ProfileManager.isWorkProfileAvailable(this, settings)
+            Log.i(TAG, "pre-O workProfileAvailable=$available")
+            if (available) {
                 finishWithResult(true)
                 return
             }
             settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
+            Log.w(TAG, "pre-O profile requires action notification")
             step = Step.ACTION_REQUIRED
         } else {
+            Log.e(TAG, "provision cancelled or failed")
             authManager.reset()
             step = Step.FAILED
         }

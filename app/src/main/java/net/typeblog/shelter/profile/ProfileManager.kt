@@ -12,6 +12,7 @@ import android.content.pm.ResolveInfo
 import android.os.Build
 import android.os.UserManager
 import android.provider.Settings
+import android.util.Log
 import net.typeblog.shelter.data.settings.SettingsStore
 import net.typeblog.shelter.receivers.DeviceAdminReceiver
 import net.typeblog.shelter.services.PaymentStubService
@@ -29,6 +30,7 @@ import net.typeblog.shelter.util.CrossProfileDocumentsProvider
  * singleton AuthManager is used everywhere.
  */
 object ProfileManager {
+    private const val TAG = "ShelterProfile"
 
     /** True when this process runs as the device/profile owner of the current user. */
     fun isProfileOwner(context: Context): Boolean =
@@ -91,6 +93,7 @@ object ProfileManager {
      */
     private fun resolveCounterpart(context: Context, intent: Intent): ComponentName {
         val resolved: List<ResolveInfo> = context.packageManager.queryIntentActivities(intent, 0)
+        Log.i(TAG, "resolve action=${intent.action} count=${resolved.size} names=${resolved.map { it.activityInfo?.let { ai -> \"${ai.packageName}/${ai.name}\" } }}")
         if (resolved.isEmpty()) {
             throw IllegalStateException("Cannot find a Shelter counterpart component")
         }
@@ -109,28 +112,16 @@ object ProfileManager {
                 val candidate = ComponentName(ai.packageName, ai.name)
                 if (forwarder != null && forwarder != candidate) {
                     throw IllegalStateException(
-                        "Multiple platform cross-profile forwarders resolve " +
-                            "${intent.action}; refusing ambiguous routing"
-                    )
+                        "Multiple platform cross-profile forwarders resolve ${intent.action}; refusing ambiguous routing")
                 }
                 forwarder = candidate
                 continue
             }
             throw IllegalStateException(
-                "Counterpart intent resolves to unverified component " +
-                    "${ai.packageName}/${ai.name}; refusing ambiguous routing"
-            )
+                "Counterpart intent resolves to unverified component ${ai.packageName}/${ai.name}; refusing ambiguous routing")
         }
-        // The platform forwarder is the only component that preserves the
-        // target-user identity; prefer it over the local context match.
-        if (forwarder != null) {
-            return forwarder
-        }
-        // Only our own activity matched: the counterpart profile is absent or
-        // its cross-profile filters were cleared.
-        if (localDummy) {
-            throw IllegalStateException("Cannot find a Shelter counterpart component")
-        }
+        if (forwarder != null) return forwarder
+        if (localDummy) throw IllegalStateException("Cannot find a Shelter counterpart component")
         throw IllegalStateException("Cannot find a Shelter counterpart component")
     }
 

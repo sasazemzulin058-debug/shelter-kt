@@ -7,6 +7,7 @@ import android.app.admin.DeviceAdminReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import net.typeblog.shelter.R
 import net.typeblog.shelter.profile.Actions
 import net.typeblog.shelter.profile.AuthManager
@@ -17,22 +18,22 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
 
     companion object {
         private const val NOTIFICATION_ID = 114514
+        private const val TAG = "ShelterAdmin"
     }
 
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
         super.onProfileProvisioningComplete(context, intent)
-
-        // After Oreo, we use the activity intent ACTION_PROVISIONING_SUCCESSFUL
-        // for finalization. As it is an activity intent, it is way more
-        // reliable (and less hacky) than doing it in a BroadcastReceiver.
-        // This is handled by FinalizeActivity, and thus we should ignore the
-        // event here.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return
-
-        // Fail closed: the shared secret must arrive through the platform
-        // provisioning admin extras bundle placed by SetupActivity. Without it
-        // there is nothing to finalize against — no secret, no finalization.
-        val secret = AuthManager.provisionedSecret(intent) ?: return
+        Log.i(TAG, "onProfileProvisioningComplete api=${Build.VERSION.SDK_INT} action=${intent.action} extrasKeys=${intent.extras?.keySet()}")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Log.i(TAG, "O+ callback delegated to FinalizeActivity")
+            return
+        }
+        val secret = AuthManager.provisionedSecret(intent)
+        Log.i(TAG, "pre-O admin extras secretPresent=${secret != null} secretLength=${secret?.size ?: 0}")
+        if (secret == null) {
+            Log.e(TAG, "pre-O provisioning secret missing")
+            return
+        }
         AuthManager(context).installProvisionedSecret(secret)
 
         // Complex logic in a BroadcastReceiver is not reliable:

@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import android.os.Bundle
 import androidx.core.content.ContextCompat
 import net.typeblog.shelter.data.settings.SettingsStore
@@ -46,7 +47,7 @@ class DummyActivity : Activity() {
         auth = AuthManager(this)
         settings = SettingsStore(this)
         super.onCreate(savedInstanceState)
-
+        Log.i(TAG, "onCreate action=${intent.action} profileOwner=${ProfileManager.isProfileOwner(this)} secret=${auth.hasSharedSecret()}")
         if (ProfileManager.isProfileOwner(this)) {
             ProfileManager.enforceWorkProfilePolicies(this, settings)
             ProfileManager.enforceUserRestrictions(this)
@@ -132,33 +133,27 @@ class DummyActivity : Activity() {
 
     private fun init() {
         val intent = intent
-
-        // PackageInstaller session callbacks are authenticated by their
-        // transaction identity (nonce/session), not the cross-profile HMAC.
+        Log.i(TAG, "init action=${intent.action} extrasKeys=${intent.extras?.keySet()}")
+        if (intent.action == Actions.FINALIZE_PROVISION) {
+            Log.i(TAG, "finalize intent received; secret=${auth.hasSharedSecret()}")
+        }
         if (intent.action == Actions.PACKAGEINSTALLER_CALLBACK) {
             CrossProfileAction.onNewIntent(this, intent)
             return
         }
-
-        // Single gate: a valid cross-profile signature, a whitelisted public
-        // action, or a consumed one-shot same-process token (see AuthManager).
-        // Anything else fails closed.
-        if (!auth.verifyIntent(intent)) {
-            // Unauthenticated: exit immediately.
+        val verified = auth.verifyIntent(intent)
+        Log.i(TAG, "intent authentication verified=$verified action=${intent.action}")
+        if (!verified) {
+            Log.e(TAG, "rejecting unauthenticated intent action=${intent.action}")
             finish()
             return
         }
-
         CrossProfileDispatcher.dispatch(this, intent, settings)
     }
 
     companion object {
-        const val REQUEST_INSTALL_PACKAGE = 1
-        const val REQUEST_PERMISSION_EXTERNAL_STORAGE = 2
         const val REQUEST_PERMISSION_POST_NOTIFICATIONS = 3
-
-        // Avoid requesting the notification permission more than once per session.
-        private var sHasRequestedPermission = false
+        private const val TAG = "ShelterDummy"
 
         /**
          * Register that an intent will be delivered to this Activity from the

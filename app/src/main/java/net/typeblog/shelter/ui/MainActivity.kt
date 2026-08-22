@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
 import android.os.RemoteException
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -45,6 +46,9 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val TAG = "ShelterMain"
+    }
 
     @Inject
     lateinit var auth: AuthManager
@@ -122,6 +126,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        Log.i(TAG, "onNewIntent action=${intent.action}")
         if (Actions.ACTION_PROFILE_PROVISIONED == intent.action) {
             init()
         }
@@ -130,14 +135,18 @@ class MainActivity : ComponentActivity() {
     private fun init() {
         val isSettingUp = settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)
         val hasSetup = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
+        Log.i(TAG, "init isSettingUp=$isSettingUp hasSetup=$hasSetup profileOwner=${ProfileManager.isProfileOwner(this)}")
 
         if (isSettingUp && !ProfileManager.isWorkProfileAvailable(this, settings)) {
+            Log.i(TAG, "launching resume setup")
             val intent = Intent(this, SetupActivity::class.java)
                 .setAction(Actions.ACTION_RESUME_SETUP)
             setupLauncher.launch(intent)
         } else if (!hasSetup) {
+            Log.i(TAG, "launching initial setup")
             setupLauncher.launch(Intent(this, SetupActivity::class.java))
         } else {
+            Log.i(TAG, "setup complete; binding services")
             ProfileManager.applyProfileSettings(this, settings)
             bindServices()
         }
