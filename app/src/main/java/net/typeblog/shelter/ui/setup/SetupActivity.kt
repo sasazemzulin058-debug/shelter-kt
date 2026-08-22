@@ -182,6 +182,7 @@ class SetupActivity : ComponentActivity() {
         } else {
             Log.e(TAG, "provision cancelled or failed")
             authManager.reset()
+            settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, false)
             step = Step.FAILED
         }
     }
