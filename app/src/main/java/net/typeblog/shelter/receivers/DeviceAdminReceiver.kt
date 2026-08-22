@@ -24,18 +24,17 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
         super.onProfileProvisioningComplete(context, intent)
         Log.i(TAG, "onProfileProvisioningComplete api=${Build.VERSION.SDK_INT} action=${intent.action} extrasKeys=${intent.extras?.keySet()}")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Log.i(TAG, "O+ callback delegated to FinalizeActivity")
-            return
-        }
         val secret = AuthManager.provisionedSecret(intent)
-        Log.i(TAG, "pre-O admin extras secretPresent=${secret != null} secretLength=${secret?.size ?: 0}")
+        Log.i(TAG, "admin extras secretPresent=${secret != null} secretLength=${secret?.size ?: 0}")
         if (secret == null) {
-            Log.e(TAG, "pre-O provisioning secret missing")
+            Log.e(TAG, "provisioning secret missing")
             return
         }
         AuthManager(context).installProvisionedSecret(secret)
-
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Log.i(TAG, "O+ secret installed; FinalizeActivity will launch finalization")
+            return
+        }
         // Complex logic in a BroadcastReceiver is not reliable:
         // delegate finalization to the DummyActivity.
         val i = Intent(context.applicationContext, DummyActivity::class.java)

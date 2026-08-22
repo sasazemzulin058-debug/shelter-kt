@@ -27,16 +27,18 @@ class FinalizeActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "onCreate action=${intent.action} extrasKeys=${intent.extras?.keySet()}")
-        val secret = AuthManager.provisionedSecret(intent)
-        Log.i(TAG, "admin extras secretPresent=${secret != null} secretLength=${secret?.size ?: 0}")
-        if (secret == null) {
-            Log.e(TAG, "provisioning extras missing or malformed")
+        val deliveredSecret = AuthManager.provisionedSecret(intent)
+        Log.i(TAG, "admin extras secretPresent=${deliveredSecret != null} secretLength=${deliveredSecret?.size ?: 0}")
+        if (deliveredSecret != null) {
+            AuthManager(this).installProvisionedSecret(deliveredSecret)
+        }
+        if (!AuthManager(this).hasSharedSecret()) {
+            Log.e(TAG, "provisioning secret unavailable")
             Toast.makeText(this, R.string.admin_extras_unavailable, Toast.LENGTH_LONG).show()
             finish()
             return
         }
-        AuthManager(this).installProvisionedSecret(secret)
-        Log.i(TAG, "shared secret installed; launching FINALIZE_PROVISION")
+        Log.i(TAG, "shared secret available; launching FINALIZE_PROVISION")
         val intent = Intent(applicationContext, DummyActivity::class.java)
         intent.action = Actions.FINALIZE_PROVISION
         AuthManager(this).registerFinalizeProvision(intent)
