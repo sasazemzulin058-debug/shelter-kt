@@ -68,9 +68,9 @@ enum class Step {
             Step.READY -> ButtonAction.START
             Step.ACTION_REQUIRED -> ButtonAction.FINISH
             Step.RECOVERY -> ButtonAction.OPEN_SETTINGS
-            Step.PROVISIONING, Step.FAILED -> ButtonAction.RETRY
+            Step.PROVISIONING -> null
+            Step.FAILED -> ButtonAction.RETRY
         }
-
     companion object {
         fun byName(name: String): Step? = entries.firstOrNull { it.name == name }
     }
