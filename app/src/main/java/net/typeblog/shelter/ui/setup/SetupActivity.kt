@@ -49,14 +49,15 @@ class SetupActivity : ComponentActivity() {
         private const val STATE_STEP = "setup_step"
         private const val TAG = "ShelterSetup"
     }
-
-    @Inject lateinit var settings: SettingsStore
     @Inject lateinit var authManager: AuthManager
 
     private val provisionProfile: ActivityResultLauncher<Unit> =
         registerForActivityResult(ProfileProvisionContract()) { result ->
             setupProfileCb(result)
         }
+
+    private var step by mutableStateOf(Step.WELCOME)
+    @Inject lateinit var settings: SettingsStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.i(TAG, "onCreate action=${intent.action} savedStep=${savedInstanceState?.getString(STATE_STEP)} profileOwner=${ProfileManager.isProfileOwner(this)}")

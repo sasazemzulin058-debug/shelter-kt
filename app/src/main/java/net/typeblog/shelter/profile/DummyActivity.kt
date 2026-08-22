@@ -150,10 +150,12 @@ class DummyActivity : Activity() {
         }
         CrossProfileDispatcher.dispatch(this, intent, settings)
     }
-
     companion object {
+        const val REQUEST_INSTALL_PACKAGE = 1
+        const val REQUEST_PERMISSION_EXTERNAL_STORAGE = 2
         const val REQUEST_PERMISSION_POST_NOTIFICATIONS = 3
         private const val TAG = "ShelterDummy"
+        private var sHasRequestedPermission = false
 
         /**
          * Register that an intent will be delivered to this Activity from the
