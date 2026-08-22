@@ -109,18 +109,28 @@
             </intent-filter>
         </activity>
 
-        <!-- Provisioning finalize listener -->
+        <activity android:name=".profile.ProvisioningModeActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Provisioning compliance callback -->
         <activity android:name=".profile.FinalizeActivity"
             android:theme="@android:style/Theme.NoDisplay"
             android:launchMode="singleTask"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <intent-filter>
-                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL"/>
-                <category android:name="android.intent.category.DEFAULT"/>
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
         <!-- Device admin receiver -->
         <receiver android:name=".receivers.DeviceAdminReceiver"
             android:label="@string/device_admin_label"

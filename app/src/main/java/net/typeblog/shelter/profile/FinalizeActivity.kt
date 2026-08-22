@@ -39,11 +39,12 @@ class FinalizeActivity : Activity() {
             return
         }
         Log.i(TAG, "shared secret available; launching FINALIZE_PROVISION")
-        val intent = Intent(applicationContext, DummyActivity::class.java)
-        intent.action = Actions.FINALIZE_PROVISION
-        AuthManager(this).registerFinalizeProvision(intent)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        startActivity(intent)
+        val next = Intent(applicationContext, DummyActivity::class.java)
+        next.action = Actions.FINALIZE_PROVISION
+        AuthManager(this).registerFinalizeProvision(next)
+        next.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        setResult(RESULT_OK)
+        startActivity(next)
         finish()
     }
 }
