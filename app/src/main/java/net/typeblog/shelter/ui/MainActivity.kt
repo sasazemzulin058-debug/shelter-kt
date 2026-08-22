@@ -48,6 +48,9 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "ShelterMain"
+
+        internal fun shouldProbeWorkProfile(isSettingUp: Boolean, hasSetup: Boolean): Boolean =
+            isSettingUp || !hasSetup
     }
 
     @Inject
@@ -135,13 +138,24 @@ class MainActivity : ComponentActivity() {
     private fun init() {
         val isSettingUp = settings.syncGetBoolean(SettingsStore.Keys.IS_SETTING_UP)
         val hasSetup = settings.syncGetBoolean(SettingsStore.Keys.HAS_SETUP)
-        Log.i(TAG, "init isSettingUp=$isSettingUp hasSetup=$hasSetup profileOwner=${ProfileManager.isProfileOwner(this)}")
+        val workProfileAvailable =
+            if (shouldProbeWorkProfile(isSettingUp, hasSetup)) {
+                ProfileManager.isWorkProfileAvailable(this, settings)
+            } else false
+        Log.i(TAG, "init isSettingUp=$isSettingUp hasSetup=$hasSetup profileOwner=${ProfileManager.isProfileOwner(this)} workProfileAvailable=$workProfileAvailable")
 
-        if (isSettingUp && !ProfileManager.isWorkProfileAvailable(this, settings)) {
+        if (isSettingUp && !workProfileAvailable) {
             Log.i(TAG, "launching resume setup")
             val intent = Intent(this, SetupActivity::class.java)
                 .setAction(Actions.ACTION_RESUME_SETUP)
             setupLauncher.launch(intent)
+        } else if (!hasSetup && workProfileAvailable) {
+            // The system may finish provisioning before the previous setup
+            // process persists its flags. Recover the existing profile instead
+            // of starting a second provisioning request.
+            Log.i(TAG, "existing work profile recovered")
+            ProfileManager.applyProfileSettings(this, settings)
+            bindServices()
         } else if (!hasSetup) {
             Log.i(TAG, "launching initial setup")
             setupLauncher.launch(Intent(this, SetupActivity::class.java))

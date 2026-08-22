@@ -149,23 +149,18 @@ class SetupActivity : ComponentActivity() {
         Log.i(TAG, "provision result=$result api=${android.os.Build.VERSION.SDK_INT}")
         if (result) {
             Log.i(TAG, "provision success; profileOwner=${ProfileManager.isProfileOwner(this)}")
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                Log.i(TAG, "O+ result; returning RESULT_OK")
-                finishWithResult(true)
-                return
-            }
-            val available = ProfileManager.isWorkProfileAvailable(this, settings)
-            Log.i(TAG, "pre-O workProfileAvailable=$available")
-            if (available) {
-                finishWithResult(true)
-                return
-            }
             settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
-            Log.w(TAG, "pre-O profile requires action notification")
-            step = Step.ACTION_REQUIRED
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O &&
+                ProfileManager.isWorkProfileAvailable(this, settings)
+            ) {
+                finishWithResult(true)
+                return
+            }
+            // O+ publishes the forwarder asynchronously; FinalizeActivity owns completion.
         } else {
             Log.e(TAG, "provision cancelled or failed")
             authManager.reset()
+            settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, false)
             step = Step.FAILED
         }
     }
