@@ -71,7 +71,9 @@ enum class Step {
             // PROVISIONING and FAILED both offer a retry: re-launch provisioning
             // after a dead spinner (lost launcher result) or a failed attempt.
             Step.PROVISIONING, Step.FAILED -> ButtonAction.RETRY
-            Step.ACTION_REQUIRED -> ButtonAction.DISMISS
+            // Finalization is driven by the system callback/notification. There
+            // is no valid user action that can claim setup completion here.
+            Step.ACTION_REQUIRED -> null
         }
 
     companion object {
@@ -80,7 +82,7 @@ enum class Step {
 }
 
 enum class ButtonAction {
-    NEXT, START, RETRY, DISMISS
+    NEXT, START, RETRY
 }
 
 private data class StepContent(
@@ -111,7 +113,6 @@ fun SetupScreen(
     onBack: () -> Unit,
     onNext: () -> Unit,
     onRetry: () -> Unit,
-    onFinish: () -> Unit,
 ) {
     // Rebinding the top-bar arrow also wires the system/hardware back button to
     // the same navigation so gesture back follows the wizard instead of the
@@ -178,10 +179,6 @@ fun SetupScreen(
                 ButtonAction.RETRY -> Button(
                     onClick = onRetry, modifier = Modifier.widthIn(min = 200.dp)) {
                     Text(stringResource(R.string.setup_button_retry))
-                }
-                ButtonAction.DISMISS -> Button(
-                    onClick = onFinish, modifier = Modifier.widthIn(min = 200.dp)) {
-                    Text(stringResource(R.string.setup_button_finish))
                 }
                 null -> Unit
             }

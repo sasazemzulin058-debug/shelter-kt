@@ -51,6 +51,7 @@
         <!-- Setup wizard -->
         <activity android:name=".ui.setup.SetupActivity"
             android:theme="@style/Theme.Shelter"
+            android:launchMode="singleTask"
             android:exported="false"/>
 
         <!-- Cross-profile intent proxy (invisible) -->
