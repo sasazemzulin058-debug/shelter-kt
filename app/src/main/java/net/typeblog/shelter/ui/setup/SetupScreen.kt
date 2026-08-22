@@ -112,8 +112,8 @@ fun SetupScreen(
     onBack: () -> Unit,
     onNext: () -> Unit,
     onRetry: () -> Unit,
+    onFinish: () -> Unit,
 ) {
-    // Rebinding the top-bar arrow also wires the system/hardware back button to
     // the same navigation so gesture back follows the wizard instead of the
     // default (which would finish the activity mid-wizard).
     BackHandler(enabled = step.hasBack()) { onBack() }
