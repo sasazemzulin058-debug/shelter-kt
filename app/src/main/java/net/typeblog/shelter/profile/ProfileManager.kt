@@ -218,7 +218,7 @@ object ProfileManager {
         context.packageManager.setComponentEnabledSetting(
             ComponentName(context.applicationContext, MainActivity::class.java),
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            0,
+            PackageManager.DONT_KILL_APP,
         )
 
         // Clear everything first so our policies are set freshly.
