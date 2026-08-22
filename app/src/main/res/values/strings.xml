@@ -35,6 +35,9 @@
     <string name="setup_provisioning">Setting up work profile…</string>
     <string name="setup_complete">Setup complete!</string>
     <string name="setup_failed">Setup failed. Your device may not support Work Profiles.</string>
+    <string name="setup_recovery_title">Work Profile needs recovery</string>
+    <string name="setup_recovery_desc">Android reports that a managed profile already exists, but Shelter cannot verify or control it. Remove the leftover Work Profile in system Settings, then return and retry. Shelter will not remove it automatically.</string>
+    <string name="setup_button_open_settings">Open Settings</string>
     <string name="setup_button_next">Next</string>
     <string name="setup_button_start">Create Work Profile</string>
     <string name="setup_button_finish">Finish</string>

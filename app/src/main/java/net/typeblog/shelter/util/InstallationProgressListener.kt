@@ -1,11 +1,11 @@
 package net.typeblog.shelter.util
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.PackageInstaller
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.ProgressBar
-import androidx.appcompat.app.AlertDialog
 import net.typeblog.shelter.R
 
 /**

@@ -1,10 +1,10 @@
 package net.typeblog.shelter.profile
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import net.typeblog.shelter.R
 
 /**
@@ -20,7 +20,7 @@ import net.typeblog.shelter.R
  * If the platform did not deliver the admin extras (no secret), finalization
  * fails closed: no policies are applied, no state is mutated.
  */
-class FinalizeActivity : AppCompatActivity() {
+class FinalizeActivity : Activity() {
     companion object {
         private const val TAG = "ShelterFinalize"
     }

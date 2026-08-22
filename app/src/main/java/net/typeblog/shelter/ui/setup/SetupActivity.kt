@@ -5,8 +5,9 @@ import android.os.PersistableBundle
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
+import android.os.UserManager
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -85,13 +86,22 @@ class SetupActivity : ComponentActivity() {
                     if (next == Step.PROVISIONING) setupProfile()
                 },
                 onRetry = {
-                    if (step == Step.PROVISIONING || step == Step.FAILED) {
+                    if (step == Step.PROVISIONING || step == Step.FAILED || step == Step.RECOVERY) {
                         step = Step.PROVISIONING
                         setupProfile()
                     }
                 },
                 onFinish = { finalizeProvisionManually() },
+                onOpenSettings = { openSystemSettings() },
             )
+        }
+    }
+
+    private fun openSystemSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (error: ActivityNotFoundException) {
+            Log.e(TAG, "system settings activity not found", error)
         }
     }
 
@@ -109,11 +119,13 @@ class SetupActivity : ComponentActivity() {
             finishWithResult(true)
         }
     }
+
     private fun finishWithResult(succeeded: Boolean) {
         Log.i(TAG, "finishWithResult succeeded=$succeeded")
         setResult(if (succeeded) RESULT_OK else RESULT_CANCELED)
         finish()
     }
+
     private fun finalizeProvisionManually() {
         val intent = Intent(Actions.FINALIZE_PROVISION).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -121,23 +133,23 @@ class SetupActivity : ComponentActivity() {
         try {
             ProfileManager.transferIntentToProfile(this, intent, authManager)
             startActivity(intent)
-        } catch (_: IllegalStateException) {
-            step = Step.ACTION_REQUIRED
+        } catch (error: IllegalStateException) {
+            Log.e(TAG, "manual finalization route unavailable", error)
+            step = Step.RECOVERY
         }
     }
 
     private fun setupProfile() {
         val policy = getSystemService(DevicePolicyManager::class.java)
         val allowed = policy.isProvisioningAllowed(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
-        Log.i(TAG, "setupProfile allowed=$allowed api=${android.os.Build.VERSION.SDK_INT}")
+        val profileCount = getSystemService(UserManager::class.java).userProfiles.size
+        Log.i(TAG, "setupProfile allowed=$allowed api=${android.os.Build.VERSION.SDK_INT} profileCount=$profileCount")
         if (!allowed) {
             Log.e(TAG, "provisioning not allowed")
-            step = Step.FAILED
+            step = if (profileCount > 1) Step.RECOVERY else Step.FAILED
             return
         }
         authManager.reset()
-        // Mark recovery state before handing control to ManagedProvisioning.
-        // Profile creation may complete after this task is killed.
         settings.syncSetBoolean(SettingsStore.Keys.IS_SETTING_UP, true)
         try {
             Log.i(TAG, "launch provisioning intent")
@@ -192,10 +204,6 @@ class SetupActivity : ComponentActivity() {
             }
             return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_SKIP_ENCRYPTION, true)
-                // API 36 may configure a role holder that is not installed on
-                // this device. Permit platform provisioning instead of retrying
-                // the unavailable role-holder path.
-                .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ALLOW_OFFLINE, true)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME, admin)
                 .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, adminExtras)
         }

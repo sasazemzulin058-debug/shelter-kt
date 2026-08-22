@@ -40,16 +40,14 @@ enum class Step {
     READY,
     PROVISIONING,
     ACTION_REQUIRED,
+    RECOVERY,
     FAILED;
-
     fun onBack(): Step = when (this) {
         Step.PERMISSIONS -> Step.WELCOME
         Step.COMPATIBILITY -> Step.PERMISSIONS
         Step.READY -> Step.COMPATIBILITY
-        // The provisioning launcher result is lost after process recreation, so
-        // the spinner would otherwise be a dead end. Back returns to READY so the
-        // user can re-start provisioning (or bail out of the wizard entirely).
         Step.PROVISIONING -> Step.READY
+        Step.RECOVERY -> Step.READY
         else -> this
     }
 
@@ -68,10 +66,8 @@ enum class Step {
         get() = when (this) {
             Step.WELCOME, Step.PERMISSIONS, Step.COMPATIBILITY -> ButtonAction.NEXT
             Step.READY -> ButtonAction.START
-            // Provisioning can finish through the system callback or a delayed
-            // notification. A signed retry is safe and does not mutate state
-            // until the managed profile authenticates it.
             Step.ACTION_REQUIRED -> ButtonAction.FINISH
+            Step.RECOVERY -> ButtonAction.OPEN_SETTINGS
             Step.PROVISIONING, Step.FAILED -> ButtonAction.RETRY
         }
 
@@ -81,7 +77,7 @@ enum class Step {
 }
 
 enum class ButtonAction {
-    NEXT, START, RETRY, FINISH
+    NEXT, START, RETRY, FINISH, OPEN_SETTINGS
 }
 
 private data class StepContent(
@@ -98,6 +94,7 @@ private val Step.content: StepContent
         Step.PROVISIONING -> StepContent(R.string.setup_provisioning, R.string.loading)
         Step.ACTION_REQUIRED -> StepContent(
             R.string.finish_provision_title, R.string.finish_provision_desc)
+        Step.RECOVERY -> StepContent(R.string.setup_recovery_title, R.string.setup_recovery_desc)
         Step.FAILED -> StepContent(R.string.setup_failed, R.string.setup_failed)
     }
 
@@ -113,8 +110,9 @@ fun SetupScreen(
     onNext: () -> Unit,
     onRetry: () -> Unit,
     onFinish: () -> Unit,
-) {
-    // the same navigation so gesture back follows the wizard instead of the
+    onOpenSettings: () -> Unit,
+)
+{
     // default (which would finish the activity mid-wizard).
     BackHandler(enabled = step.hasBack()) { onBack() }
 
@@ -182,6 +180,10 @@ fun SetupScreen(
                 ButtonAction.FINISH -> Button(
                     onClick = onFinish, modifier = Modifier.widthIn(min = 200.dp)) {
                     Text(stringResource(R.string.setup_button_finish))
+                }
+                ButtonAction.OPEN_SETTINGS -> Button(
+                    onClick = onOpenSettings, modifier = Modifier.widthIn(min = 200.dp)) {
+                    Text(stringResource(R.string.setup_button_open_settings))
                 }
                 null -> Unit
             }
